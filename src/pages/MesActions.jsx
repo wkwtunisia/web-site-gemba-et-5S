@@ -1,29 +1,35 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../supabaseClient'
 import { fetchActions, upsertAction, logActionHistory } from '../services/actionsApi'
+import { fetchUsers } from '../services/usersApi'
 
 export default function MesActions({ userEmail }) {
   const [audits5S, setAudits5S] = useState([])
   const [auditsGemba, setAuditsGemba] = useState([])
   const [actions, setActions] = useState([])
+  const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState('5S')
 
   const [editMode, setEditMode] = useState({})
   const [drafts, setDrafts] = useState({})
 
-  useEffect(() => {
+  const loadData = () => {
     Promise.all([
       supabase.from('audits').select('*'),
       supabase.from('gemba_audits').select('*'),
-      fetchActions()
-    ]).then(([res5S, resGemba, actionsRes]) => {
+      fetchActions(),
+      fetchUsers()
+    ]).then(([res5S, resGemba, actionsRes, usersRes]) => {
       if (!res5S.error) setAudits5S(res5S.data || [])
       if (!resGemba.error) setAuditsGemba(resGemba.data || [])
       setActions(actionsRes)
+      setUsers(usersRes)
       setLoading(false)
     })
-  }, [])
+  }
+
+  useEffect(() => { loadData() }, [])
 
   const myActions = useMemo(() => actions.filter(a => a.pilote_email === userEmail), [actions, userEmail])
   const my5S = myActions.filter(a => a.type === '5S')
@@ -40,7 +46,13 @@ export default function MesActions({ userEmail }) {
     setEditMode(prev => ({ ...prev, [key]: true }))
     setDrafts(prev => ({
       ...prev,
-      [key]: { progression: item.progression, date_realisation: item.date_realisation || '' }
+      [key]: {
+        action_texte: item.action_texte || '',
+        pilote_email: item.pilote_email || '',
+        date_prevue: item.date_prevue || '',
+        progression: item.progression,
+        date_realisation: item.date_realisation || ''
+      }
     }))
   }
 
@@ -58,7 +70,15 @@ export default function MesActions({ userEmail }) {
     let finalDate = draft.date_realisation
     if (draft.progression === 100 && !finalDate) finalDate = new Date().toISOString().split('T')[0]
 
-    const updated = { ...item, progression: draft.progression, date_realisation: finalDate }
+    const updated = { 
+      ...item, 
+      action_texte: draft.action_texte,
+      pilote_email: draft.pilote_email,
+      date_prevue: draft.date_prevue,
+      progression: draft.progression, 
+      date_realisation: finalDate 
+    }
+    
     const savedData = await upsertAction(updated)
     
     if (savedData) {
@@ -67,13 +87,16 @@ export default function MesActions({ userEmail }) {
         modified_by: userEmail,
         old_progression: item.progression,
         new_progression: draft.progression,
-        date_realisation: finalDate
+        old_action: item.action_texte,
+        new_action: draft.action_texte,
+        date_prevue: draft.date_prevue,
+        date_realisation: finalDate,
+        target_pilot: draft.pilote_email,
+        action_type: item.type,
+        audit_ligne: item.ligne,
+        audit_question: item.question
       })
-      setActions(prev => {
-        const idx = prev.findIndex(a => a.audit_date === savedData.audit_date && a.ligne === savedData.ligne && a.question === savedData.question)
-        if (idx >= 0) { const copy = [...prev]; copy[idx] = savedData; return copy }
-        return [...prev, savedData]
-      })
+      loadData()
     }
     cancelEdit(key)
   }
@@ -89,13 +112,12 @@ export default function MesActions({ userEmail }) {
         modified_by: userEmail,
         old_progression: item.progression,
         new_progression: 100,
-        date_realisation: today
+        date_realisation: today,
+        action_type: item.type,
+        audit_ligne: item.ligne,
+        audit_question: item.question
       })
-      setActions(prev => {
-        const idx = prev.findIndex(a => a.audit_date === savedData.audit_date && a.ligne === savedData.ligne && a.question === savedData.question)
-        if (idx >= 0) { const copy = [...prev]; copy[idx] = savedData; return copy }
-        return [...prev, savedData]
-      })
+      loadData()
     }
   }
 
@@ -120,7 +142,6 @@ export default function MesActions({ userEmail }) {
         </div>
       </div>
 
-      {/* BANNIÈRE D'ALERTE RETARD */}
       {actionsEnRetard.length > 0 && (
         <div style={{ background: 'rgba(239, 68, 68, 0.1)', borderLeft: '4px solid var(--danger)', padding: '1rem', borderRadius: '4px', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <span style={{ fontSize: '1.5rem' }}>🔔</span>
@@ -141,15 +162,16 @@ export default function MesActions({ userEmail }) {
                 {tab === 'GEMBA' && <th>Point M</th>}
                 <th>Problème</th>
                 <th>Action</th>
+                <th>Pilote</th>
                 <th>Date Prévue</th>
-                <th style={{ width: '200px' }}>Progression</th>
+                <th style={{ width: '150px' }}>Progression</th>
                 <th>Date Réalisation</th>
                 <th style={{ width: '150px' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {currentList.length === 0 ? (
-                <tr><td colSpan="9" className="muted" style={{ textAlign: 'center', padding: '2rem' }}>Aucune action ne vous est assignée pour le moment.</td></tr>
+                <tr><td colSpan="10" className="muted" style={{ textAlign: 'center', padding: '2rem' }}>Aucune action ne vous est assignée pour le moment.</td></tr>
               ) : currentList.map((item, i) => {
                 const key = `${item.audit_date}|${item.ligne}|${item.question}`
                 const isEditing = editMode[key]
@@ -161,15 +183,39 @@ export default function MesActions({ userEmail }) {
                     <td>{new Date(item.audit_date).toLocaleDateString('fr-FR')}</td>
                     <td style={{ fontWeight: 'bold' }}>{item.ligne}</td>
                     {tab === 'GEMBA' && <td style={{ color: 'var(--text-muted)' }}>{item.point_m}</td>}
-                    <td style={{ whiteSpace: 'normal', maxWidth: '250px' }}>{item.question}</td>
-                    <td style={{ whiteSpace: 'normal', maxWidth: '250px', color: 'var(--warning)' }}>{item.action_texte}</td>
+                    <td style={{ whiteSpace: 'normal', maxWidth: '200px' }}>{item.question}</td>
+                    
                     <td>
-                      {item.date_prevue ? (
-                        <span style={{ color: late ? 'var(--danger)' : 'var(--text-main)', fontWeight: late ? 'bold' : 'normal' }}>
-                          {new Date(item.date_prevue).toLocaleDateString('fr-FR')} {late && '(En retard)'}
-                        </span>
-                      ) : <span className="muted">—</span>}
+                      {isEditing ? (
+                        <input type="text" className="filter-control" style={{ width: '100%' }} value={draft.action_texte || ''} onChange={(e) => setDrafts(prev => ({ ...prev, [key]: { ...prev[key], action_texte: e.target.value } }))} />
+                      ) : (
+                        <span style={{ color: 'var(--warning)' }}>{item.action_texte || '—'}</span>
+                      )}
                     </td>
+
+                    <td>
+                      {isEditing ? (
+                        <select className="filter-control" style={{ width: '100%' }} value={draft.pilote_email || ''} onChange={(e) => setDrafts(prev => ({ ...prev, [key]: { ...prev[key], pilote_email: e.target.value } }))}>
+                          <option value="">-- Choisir --</option>
+                          {users.map(u => <option key={u.email} value={u.email}>{u.email}</option>)}
+                        </select>
+                      ) : (
+                        item.pilote_email || <span className="muted">—</span>
+                      )}
+                    </td>
+
+                    <td>
+                      {isEditing ? (
+                        <input type="date" className="filter-control" style={{ width: '100%' }} value={draft.date_prevue || ''} onChange={(e) => setDrafts(prev => ({ ...prev, [key]: { ...prev[key], date_prevue: e.target.value } }))} />
+                      ) : (
+                        item.date_prevue ? (
+                          <span style={{ color: late ? 'var(--danger)' : 'var(--text-main)', fontWeight: late ? 'bold' : 'normal' }}>
+                            {new Date(item.date_prevue).toLocaleDateString('fr-FR')} {late && '(Retard)'}
+                          </span>
+                        ) : <span className="muted">—</span>
+                      )}
+                    </td>
+
                     <td>
                       {isEditing ? (
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -182,6 +228,7 @@ export default function MesActions({ userEmail }) {
                         </span>
                       )}
                     </td>
+
                     <td>
                       {isEditing ? (
                         <input type="date" className="filter-control" style={{ width: '100%' }} value={draft.date_realisation || ''} onChange={(e) => setDrafts(prev => ({ ...prev, [key]: { ...prev[key], date_realisation: e.target.value } }))} />
@@ -191,6 +238,7 @@ export default function MesActions({ userEmail }) {
                         ) : <span className="muted">—</span>
                       )}
                     </td>
+
                     <td>
                       <div style={{ display: 'flex', gap: '0.25rem', alignItems: 'center' }}>
                         {isEditing ? (

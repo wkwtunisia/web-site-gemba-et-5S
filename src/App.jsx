@@ -124,7 +124,7 @@ export default function App() {
 
         {currentView === 'mes_actions' && <MesActions userEmail={session.user.email} />}
         {currentView === 'parametres' && <Parametres />}
-        {currentView === 'historique' && <HistoriqueActions />}
+        {currentView === 'historique' && <HistoriqueActions userEmail={session.user.email} role={role} />}
 
         {/* GEMBA */}
         {currentView === 'import_gemba' && <ImportGemba />}

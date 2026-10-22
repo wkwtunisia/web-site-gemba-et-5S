@@ -98,7 +98,6 @@ export default function PlanAction5S() {
       date_prevue: draft.date_prevue
     }
     
-    // On récupère la vraie ligne (avec le bon ID)
     const savedData = await upsertAction(updated)
     
     if (savedData && (draft.action_texte !== item.action_texte || draft.pilote_email !== item.pilote_email || draft.date_prevue !== item.date_prevue)) {
@@ -109,11 +108,14 @@ export default function PlanAction5S() {
         new_progression: item.progression,
         old_action: item.action_texte,
         new_action: draft.action_texte,
-        date_prevue: draft.date_prevue
+        date_prevue: draft.date_prevue,
+        target_pilot: draft.pilote_email,
+        action_type: '5S',
+        audit_ligne: item.ligne,
+        audit_question: item.question
       })
     }
 
-    // On met à jour l'interface avec la version exacte de la base
     setActions(prev => {
       if (!savedData) return prev;
       const idx = prev.findIndex(a => a.audit_date === savedData.audit_date && a.ligne === savedData.ligne && a.question === savedData.question)
@@ -124,7 +126,6 @@ export default function PlanAction5S() {
     cancelEdit(key)
   }
 
-  // Fonction pour mettre à jour la progression
   const handleUpdateProgression = async (item, newProgression) => {
     const updated = { ...item, progression: newProgression }
     const savedData = await upsertAction(updated)

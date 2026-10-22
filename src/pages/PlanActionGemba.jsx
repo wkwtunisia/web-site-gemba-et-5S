@@ -106,7 +106,11 @@ export default function PlanActionGemba() {
         new_progression: item.progression,
         old_action: item.action_texte,
         new_action: draft.action_texte,
-        date_prevue: draft.date_prevue
+        date_prevue: draft.date_prevue,
+        target_pilot: draft.pilote_email,
+        action_type: 'GEMBA',
+        audit_ligne: item.ligne,
+        audit_question: item.question
       })
     }
 

@@ -2,39 +2,66 @@ import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../supabaseClient'
 import { fetchActions, upsertAction, logActionHistory } from '../services/actionsApi'
 import { fetchUsers } from '../services/usersApi'
+import { fetchPhotosByAction, insertActionPhoto, deleteActionPhoto } from '../services/actionPhotosApi'
+import { uploadActionPhoto } from '../services/storageApi'
 
 export default function MesActions({ userEmail }) {
   const [audits5S, setAudits5S] = useState([])
   const [auditsGemba, setAuditsGemba] = useState([])
   const [actions, setActions] = useState([])
   const [users, setUsers] = useState([])
+  const [photosByAction, setPhotosByAction] = useState({})
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState('5S')
+  const [uploading, setUploading] = useState({})
+  
+  // 🌟 NOUVEAU : Détection du rôle admin
+  const [isAdmin, setIsAdmin] = useState(false)
 
   const [editMode, setEditMode] = useState({})
   const [drafts, setDrafts] = useState({})
+
+  const reloadPhotos = async () => {
+    const map = await fetchPhotosByAction()
+    setPhotosByAction(map)
+  }
 
   const loadData = () => {
     Promise.all([
       supabase.from('audits').select('*'),
       supabase.from('gemba_audits').select('*'),
       fetchActions(),
-      fetchUsers()
-    ]).then(([res5S, resGemba, actionsRes, usersRes]) => {
+      fetchUsers(),
+      fetchPhotosByAction()
+    ]).then(([res5S, resGemba, actionsRes, usersRes, photosMap]) => {
       if (!res5S.error) setAudits5S(res5S.data || [])
       if (!resGemba.error) setAuditsGemba(resGemba.data || [])
       setActions(actionsRes)
-      setUsers(usersRes)
+      setUsers(usersRes || [])
+      setPhotosByAction(photosMap || {})
       setLoading(false)
     })
   }
 
-  useEffect(() => { loadData() }, [])
+  useEffect(() => { 
+    loadData() 
+    
+    // 🌟 NOUVEAU : Vérifier si l'utilisateur est admin via la table profiles
+    if (userEmail) {
+      supabase.from('profiles').select('role').eq('email', userEmail).single().then(({ data }) => {
+        if (data && data.role === 'admin') setIsAdmin(true)
+      })
+    }
+  }, [userEmail])
 
-  const myActions = useMemo(() => actions.filter(a => a.pilote_email === userEmail), [actions, userEmail])
+  const safeEmail = (userEmail || '').trim().toLowerCase()
+  
+  const myActions = useMemo(() => {
+    return actions.filter(a => (a.pilote_email || '').trim().toLowerCase() === safeEmail)
+  }, [actions, safeEmail])
+
   const my5S = myActions.filter(a => a.type === '5S')
   const myGemba = myActions.filter(a => a.type === 'GEMBA')
-
   const currentList = tab === '5S' ? my5S : myGemba
 
   const actionsEnRetard = currentList.filter(item => {
@@ -84,7 +111,7 @@ export default function MesActions({ userEmail }) {
     if (savedData) {
       await logActionHistory({
         action_id: savedData.id,
-        modified_by: userEmail,
+        modified_by: safeEmail,
         old_progression: item.progression,
         new_progression: draft.progression,
         old_action: item.action_texte,
@@ -109,7 +136,7 @@ export default function MesActions({ userEmail }) {
     if (savedData) {
       await logActionHistory({
         action_id: savedData.id,
-        modified_by: userEmail,
+        modified_by: safeEmail,
         old_progression: item.progression,
         new_progression: 100,
         date_realisation: today,
@@ -119,6 +146,32 @@ export default function MesActions({ userEmail }) {
       })
       loadData()
     }
+  }
+
+  const handleAddPhotos = async (item, key, fileList) => {
+    const files = Array.from(fileList || [])
+    if (files.length === 0) return
+
+    setUploading(prev => ({ ...prev, [key]: true }))
+    for (const file of files) {
+      const uploaded = await uploadActionPhoto(file, key)
+      if (uploaded?.url) {
+        await insertActionPhoto({
+          action_id: item.id,
+          url: uploaded.url,
+          storage_path: uploaded.path,
+          uploaded_by: safeEmail
+        })
+      }
+    }
+    setUploading(prev => ({ ...prev, [key]: false }))
+    await reloadPhotos()
+  }
+
+  const handleRemovePhoto = async (photo) => {
+    if (!confirm('Supprimer cette photo ?')) return
+    await deleteActionPhoto(photo)
+    await reloadPhotos()
   }
 
   const isLate = (item) => {
@@ -164,19 +217,21 @@ export default function MesActions({ userEmail }) {
                 <th>Action</th>
                 <th>Pilote</th>
                 <th>Date Prévue</th>
-                <th style={{ width: '150px' }}>Progression</th>
+                <th style={{ width: '130px' }}>Progression</th>
                 <th>Date Réalisation</th>
+                <th style={{ width: '200px' }}>Photos</th>
                 <th style={{ width: '150px' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {currentList.length === 0 ? (
-                <tr><td colSpan="10" className="muted" style={{ textAlign: 'center', padding: '2rem' }}>Aucune action ne vous est assignée pour le moment.</td></tr>
+                <tr><td colSpan="11" className="muted" style={{ textAlign: 'center', padding: '2rem' }}>Aucune action ne vous est assignée pour le moment.</td></tr>
               ) : currentList.map((item, i) => {
                 const key = `${item.audit_date}|${item.ligne}|${item.question}`
                 const isEditing = editMode[key]
                 const draft = drafts[key] || {}
                 const late = isLate(item)
+                const photos = photosByAction[item.id] || []
 
                 return (
                   <tr key={i}>
@@ -237,6 +292,33 @@ export default function MesActions({ userEmail }) {
                           <span style={{ color: 'var(--success)', fontWeight: 'bold' }}>{new Date(item.date_realisation).toLocaleDateString('fr-FR')}</span>
                         ) : <span className="muted">—</span>
                       )}
+                    </td>
+
+                    {/* 🌟 COLONNE PHOTOS (Suppression cachée si non-admin) */}
+                    <td>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginBottom: '0.5rem' }}>
+                        {photos.map(p => (
+                          <div key={p.id} style={{ position: 'relative' }}>
+                            <a href={p.url} target="_blank" rel="noreferrer">
+                              <img src={p.url} alt="preuve" style={{ width: '40px', height: '40px', objectFit: 'cover', borderRadius: '4px', border: '1px solid var(--border)' }} />
+                            </a>
+                            {/* 🌟 Bouton supprimer uniquement pour l'admin */}
+                            {isAdmin && (
+                              <button
+                                onClick={() => handleRemovePhoto(p)}
+                                title="Supprimer"
+                                style={{ position: 'absolute', top: '-4px', right: '-4px', background: 'var(--danger)', color: 'white', border: 'none', borderRadius: '50%', width: '16px', height: '16px', fontSize: '10px', cursor: 'pointer', lineHeight: 1, padding: 0 }}
+                              >×</button>
+                            )}
+                          </div>
+                        ))}
+                        {photos.length === 0 && <span className="muted" style={{ fontSize: '0.75rem' }}>—</span>}
+                      </div>
+                      
+                      <label style={{ display: 'inline-block', padding: '0.3rem 0.6rem', backgroundColor: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '4px', cursor: uploading[key] ? 'wait' : 'pointer', fontSize: '0.75rem', opacity: uploading[key] ? 0.5 : 1 }}>
+                        {uploading[key] ? '⏳ Upload...' : '📷 Ajouter preuve'}
+                        <input type="file" accept="image/*" multiple disabled={!!uploading[key]} onChange={(e) => handleAddPhotos(item, key, e.target.files)} style={{ display: 'none' }} />
+                      </label>
                     </td>
 
                     <td>

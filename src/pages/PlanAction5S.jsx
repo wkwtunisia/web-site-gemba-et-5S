@@ -111,8 +111,8 @@ export default function PlanAction5S() {
         date_prevue: draft.date_prevue,
         target_pilot: draft.pilote_email,
         action_type: '5S',
-        audit_ligne: item.ligne,
-        audit_question: item.question
+        audit_ligne: item.ligne,          // 🌟 NOUVEAU
+        audit_question: item.question     // 🌟 NOUVEAU
       })
     }
 

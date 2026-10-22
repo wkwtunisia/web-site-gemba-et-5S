@@ -2,25 +2,36 @@ import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../supabaseClient'
 import { fetchActions, upsertAction, logActionHistory } from '../services/actionsApi'
 import { fetchUsers } from '../services/usersApi'
+import { uploadActionPhoto } from '../services/storageApi'
+import { fetchPhotosByAction, insertActionPhoto, deleteActionPhoto } from '../services/actionPhotosApi'
 
 export default function PlanActionGemba() {
   const [audits, setAudits] = useState([])
   const [actions, setActions] = useState([])
   const [users, setUsers] = useState([])
+  const [photosByAction, setPhotosByAction] = useState({})
   const [loading, setLoading] = useState(true)
+  const [uploading, setUploading] = useState({})
 
   const [editMode, setEditMode] = useState({})
   const [drafts, setDrafts] = useState({})
+
+  const reloadPhotos = async () => {
+    const map = await fetchPhotosByAction()
+    setPhotosByAction(map)
+  }
 
   useEffect(() => {
     Promise.all([
       supabase.from('gemba_audits').select('*').order('date', { ascending: false }),
       fetchActions(),
-      fetchUsers()
-    ]).then(([auditsRes, actionsRes, usersRes]) => {
+      fetchUsers(),
+      fetchPhotosByAction()
+    ]).then(([auditsRes, actionsRes, usersRes, photosMap]) => {
       if (!auditsRes.error) setAudits(auditsRes.data || [])
       setActions(actionsRes)
       setUsers(usersRes)
+      setPhotosByAction(photosMap || {})
       setLoading(false)
     })
   }, [])
@@ -29,21 +40,21 @@ export default function PlanActionGemba() {
     const list = []
     audits.forEach(audit => {
       if (String(audit.reponse).toUpperCase() === 'NOK') {
-        const existingAction = actions.find(a => 
-          a.type === 'GEMBA' && 
-          a.audit_date === audit.date && 
-          a.ligne === audit.ligne && 
+        const existingAction = actions.find(a =>
+          a.type === 'GEMBA' &&
+          a.audit_date === audit.date &&
+          a.ligne === audit.ligne &&
           a.question === audit.question
         )
-        
+
         list.push({
           id: existingAction?.id,
-          type: 'GEMBA', 
-          audit_date: audit.date, 
-          ligne: audit.ligne, 
-          point_m: audit.point_m, 
+          type: 'GEMBA',
+          audit_date: audit.date,
+          ligne: audit.ligne,
+          point_m: audit.point_m,
           question: audit.question,
-          action_texte: existingAction?.action_texte || audit.action || '', 
+          action_texte: existingAction?.action_texte || audit.action || '',
           progression: existingAction?.progression || 0,
           pilote_email: existingAction?.pilote_email || '',
           date_prevue: existingAction?.date_prevue || '',
@@ -60,10 +71,7 @@ export default function PlanActionGemba() {
   const tauxRealisation = totalActions > 0 ? Math.round((actionsRealisees / totalActions) * 100) : 0
 
   const handleDraftChange = (key, field, value) => {
-    setDrafts(prev => ({
-      ...prev,
-      [key]: { ...prev[key], [field]: value }
-    }))
+    setDrafts(prev => ({ ...prev, [key]: { ...prev[key], [field]: value } }))
   }
 
   const enableEdit = (item, key) => {
@@ -80,25 +88,70 @@ export default function PlanActionGemba() {
 
   const cancelEdit = (key) => {
     setEditMode(prev => ({ ...prev, [key]: false }))
-    setDrafts(prev => {
-      const copy = { ...prev }
-      delete copy[key]
-      return copy
-    })
+    setDrafts(prev => { const copy = { ...prev }; delete copy[key]; return copy })
+  }
+
+  const handleAddPhotos = async (item, key, fileList) => {
+    const files = Array.from(fileList || [])
+    if (files.length === 0) return
+
+    setUploading(prev => ({ ...prev, [key]: true }))
+    
+    // Créer l'action automatiquement si elle n'existe pas encore
+    let actionId = item.id
+    if (!actionId) {
+      const savedData = await upsertAction(item)
+      if (savedData) {
+        actionId = savedData.id
+        setActions(prev => {
+          const idx = prev.findIndex(a => a.audit_date === savedData.audit_date && a.ligne === savedData.ligne && a.question === savedData.question)
+          if (idx >= 0) { const copy = [...prev]; copy[idx] = savedData; return copy }
+          return [...prev, savedData]
+        })
+      } else {
+        alert("Erreur lors de la création de l'action.")
+        setUploading(prev => ({ ...prev, [key]: false }))
+        return
+      }
+    }
+
+    for (const file of files) {
+      const uploaded = await uploadActionPhoto(file, key)
+      if (uploaded?.url) {
+        await insertActionPhoto({
+          action_id: actionId,
+          url: uploaded.url,
+          storage_path: uploaded.path,
+          uploaded_by: 'Admin'
+        })
+      }
+    }
+    setUploading(prev => ({ ...prev, [key]: false }))
+    await reloadPhotos()
+  }
+
+  const handleRemovePhoto = async (photo) => {
+    if (!confirm('Supprimer cette photo ?')) return
+    await deleteActionPhoto(photo)
+    await reloadPhotos()
   }
 
   const saveEdit = async (item, key) => {
     const draft = drafts[key]
-    const updated = { 
-      ...item, 
+    const updated = {
+      ...item,
       action_texte: draft.action_texte,
       pilote_email: draft.pilote_email,
       date_prevue: draft.date_prevue
     }
-    
+
     const savedData = await upsertAction(updated)
-    
-    if (savedData && (draft.action_texte !== item.action_texte || draft.pilote_email !== item.pilote_email || draft.date_prevue !== item.date_prevue)) {
+
+    if (savedData && (
+      draft.action_texte !== item.action_texte ||
+      draft.pilote_email !== item.pilote_email ||
+      draft.date_prevue !== item.date_prevue
+    )) {
       await logActionHistory({
         action_id: savedData.id,
         modified_by: 'Admin',
@@ -127,7 +180,6 @@ export default function PlanActionGemba() {
   const handleUpdateProgression = async (item, newProgression) => {
     const updated = { ...item, progression: newProgression }
     const savedData = await upsertAction(updated)
-    
     setActions(prev => {
       if (!savedData) return prev;
       const idx = prev.findIndex(a => a.audit_date === savedData.audit_date && a.ligne === savedData.ligne && a.question === savedData.question)
@@ -172,11 +224,12 @@ export default function PlanActionGemba() {
                 <th>Ligne</th>
                 <th>Point M</th>
                 <th>Problème (NOK)</th>
-                <th style={{ width: '20%' }}>Action Corrective</th>
-                <th style={{ width: '15%' }}>Pilote</th>
-                <th style={{ width: '12%' }}>Date Prévue</th>
-                <th style={{ width: '12%' }}>Date Réalisée</th>
-                <th style={{ width: '150px' }}>Progression</th>
+                <th style={{ width: '16%' }}>Action Corrective</th>
+                <th style={{ width: '13%' }}>Pilote</th>
+                <th style={{ width: '10%' }}>Date Prévue</th>
+                <th style={{ width: '10%' }}>Date Réalisée</th>
+                <th style={{ width: '200px' }}>Photos</th>
+                <th style={{ width: '140px' }}>Progression</th>
                 <th style={{ width: '120px' }}>Actions</th>
               </tr>
             </thead>
@@ -185,6 +238,7 @@ export default function PlanActionGemba() {
                 const key = `${item.audit_date}|${item.ligne}|${item.question}`
                 const isEditing = editMode[key]
                 const draft = drafts[key] || {}
+                const photos = item.id ? (photosByAction[item.id] || []) : []
 
                 return (
                   <tr key={i}>
@@ -203,9 +257,7 @@ export default function PlanActionGemba() {
                       {isEditing ? (
                         <select className="filter-control" style={{ width: '100%' }} value={draft.pilote_email || ''} onChange={(e) => handleDraftChange(key, 'pilote_email', e.target.value)}>
                           <option value="">-- Choisir --</option>
-                          {users.map(u => (
-                            <option key={u.email} value={u.email}>{u.email}</option>
-                          ))}
+                          {users.map(u => (<option key={u.email} value={u.email}>{u.email}</option>))}
                         </select>
                       ) : (
                         item.pilote_email || <span className="muted">—</span>
@@ -221,6 +273,47 @@ export default function PlanActionGemba() {
                     <td style={{ color: item.date_realisation ? 'var(--success)' : 'var(--text-muted)', textAlign: 'center' }}>
                       {item.date_realisation ? new Date(item.date_realisation).toLocaleDateString('fr-FR') : '—'}
                     </td>
+                    
+                    {/* 🌟 Colonne multi-photos */}
+                    <td>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem', marginBottom: '0.5rem' }}>
+                        {photos.map(p => (
+                          <div key={p.id} style={{ position: 'relative' }}>
+                            <a href={p.url} target="_blank" rel="noreferrer">
+                              <img src={p.url} alt="photo action" style={{ width: '45px', height: '45px', objectFit: 'cover', borderRadius: '4px', border: '1px solid var(--border)' }} />
+                            </a>
+                            <button
+                              onClick={() => handleRemovePhoto(p)}
+                              title="Supprimer"
+                              style={{ position: 'absolute', top: '-4px', right: '-4px', background: 'var(--danger)', color: 'white', border: 'none', borderRadius: '50%', width: '16px', height: '16px', fontSize: '10px', cursor: 'pointer', lineHeight: 1, padding: 0 }}
+                            >×</button>
+                          </div>
+                        ))}
+                        {photos.length === 0 && <span className="muted" style={{ fontSize: '0.75rem' }}>—</span>}
+                      </div>
+                      
+                      <label style={{ 
+                        display: 'inline-block', 
+                        padding: '0.3rem 0.6rem', 
+                        backgroundColor: 'var(--surface)', 
+                        border: '1px solid var(--border)', 
+                        borderRadius: '4px', 
+                        cursor: uploading[key] ? 'wait' : 'pointer',
+                        fontSize: '0.75rem',
+                        opacity: uploading[key] ? 0.5 : 1
+                      }}>
+                        {uploading[key] ? '⏳ Upload...' : '📷 Ajouter'}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          disabled={!!uploading[key]}
+                          onChange={(e) => handleAddPhotos(item, key, e.target.files)}
+                          style={{ display: 'none' }}
+                        />
+                      </label>
+                    </td>
+
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <input type="range" min="0" max="100" step="25" value={item.progression} disabled={isEditing} onChange={(e) => handleUpdateProgression(item, Number(e.target.value))} style={{ flex: 1 }} />

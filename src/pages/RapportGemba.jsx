@@ -22,6 +22,17 @@ const urlToBase64 = async (url) => {
   }
 }
 
+const COLORS = {
+  primary: [15, 23, 42],
+  accent: [37, 99, 235],
+  success: [16, 185, 129],
+  danger: [239, 68, 68],
+  warning: [245, 158, 11],
+  light: [248, 250, 252],
+  border: [226, 232, 240],
+  textMuted: [100, 116, 139]
+}
+
 export default function RapportGemba() {
   const [data, setData] = useState([])
   const [actions, setActions] = useState([])
@@ -29,6 +40,7 @@ export default function RapportGemba() {
   const [loading, setLoading] = useState(true)
   const [selectedAuditId, setSelectedAuditId] = useState('')
   const [uploading, setUploading] = useState(false)
+  const [isAdmin, setIsAdmin] = useState(false) // 🌟 Détection Admin
 
   const loadData = async () => {
     const [auditsRes, actionsRes, photosMap] = await Promise.all([
@@ -44,6 +56,14 @@ export default function RapportGemba() {
 
   useEffect(() => {
     loadData()
+    // 🌟 Vérification du rôle
+    supabase.auth.getUser().then(({ data }) => {
+      if (data?.user?.email) {
+        supabase.from('profiles').select('role').eq('email', data.user.email).single().then(({ data: profile }) => {
+          if (profile && profile.role === 'admin') setIsAdmin(true)
+        })
+      }
+    })
   }, [])
 
   const auditsGrouped = useMemo(() => {
@@ -65,12 +85,7 @@ export default function RapportGemba() {
 
   const getActionForRow = (row) => {
     if (!row) return null
-    return actions.find(a =>
-      a.type === 'GEMBA' &&
-      a.audit_date === row.date &&
-      a.ligne === row.ligne &&
-      a.question === row.question
-    )
+    return actions.find(a => a.type === 'GEMBA' && a.audit_date === row.date && a.ligne === row.ligne && a.question === row.question)
   }
 
   const getDbPhotosForRow = (row) => {
@@ -79,55 +94,25 @@ export default function RapportGemba() {
     return photosByAction[action.id] || []
   }
 
-  // 🌟 NOUVEAU : Synchronisation avec le plan d'action
   const handlePhotoUpload = async (row, e) => {
     const files = Array.from(e.target.files)
     if (files.length === 0) return
-
     setUploading(true)
     let action = getActionForRow(row)
     let actionId = action?.id
-
-    // 1. Créer l'action si elle n'existe pas encore dans le plan d'action
     if (!actionId) {
-      const newAction = {
-        type: 'GEMBA',
-        audit_date: row.date,
-        ligne: row.ligne,
-        point_m: row.point_m,
-        question: row.question,
-        action_texte: row.action !== '-' ? row.action : '',
-        progression: 0
-      }
+      const newAction = { type: 'GEMBA', audit_date: row.date, ligne: row.ligne, point_m: row.point_m, question: row.question, action_texte: row.action !== '-' ? row.action : '', progression: 0 }
       const savedData = await upsertAction(newAction)
-      if (savedData) {
-        actionId = savedData.id
-        setActions(prev => [...prev, savedData])
-      } else {
-        alert("Erreur lors de la création de l'action.")
-        setUploading(false)
-        return
-      }
+      if (savedData) { actionId = savedData.id; setActions(prev => [...prev, savedData]) }
+      else { alert("Erreur création action."); setUploading(false); return }
     }
-
-    // 2. Uploader les photos et les lier à l'action
     const key = `${row.date}|${row.ligne}|${row.question}`
     for (const file of files) {
       const uploaded = await uploadActionPhoto(file, key)
-      if (uploaded?.url) {
-        await insertActionPhoto({
-          action_id: actionId,
-          url: uploaded.url,
-          storage_path: uploaded.path,
-          uploaded_by: 'Admin'
-        })
-      }
+      if (uploaded?.url) await insertActionPhoto({ action_id: actionId, url: uploaded.url, storage_path: uploaded.path, uploaded_by: 'Admin' })
     }
-
-    // 3. Recharger les photos
     const updatedPhotos = await fetchPhotosByAction()
     setPhotosByAction(updatedPhotos)
-    
     setUploading(false)
     e.target.value = ''
   }
@@ -158,107 +143,165 @@ export default function RapportGemba() {
     const globalTotal = rows.filter(r => r.reponse === 'OK' || r.reponse === 'NOK').length
     const globalScore = globalTotal > 0 ? Math.round((globalOk / globalTotal) * 100) : 0
 
-    // PAGE 1
+    // --- PAGE 1 : COUVERTURE ---
+    doc.setFillColor(...COLORS.primary)
+    doc.rect(0, 0, pageWidth, pageHeight, 'F')
+    
     const imgLogo = new Image()
     imgLogo.src = '/logo.png'
-    try { doc.addImage(imgLogo, 'PNG', pageWidth / 2 - 20, 30, 40, 40) } catch (e) {}
-    doc.setFontSize(28); doc.setTextColor(15, 23, 42); doc.text("RAPPORT D'AUDIT GEMBA", pageWidth / 2, 90, { align: 'center' })
-    doc.setFontSize(16); doc.setTextColor(100, 116, 139); doc.text(`Ligne : ${selectedAudit.ligne}`, pageWidth / 2, 110, { align: 'center' }); doc.text(`UAP : ${selectedAudit.uap}`, pageWidth / 2, 118, { align: 'center' })
-    doc.setFontSize(14); doc.text(`Date de l'audit : ${new Date(selectedAudit.date).toLocaleDateString('fr-FR')}`, pageWidth / 2, 130, { align: 'center' })
-    doc.setFontSize(10); doc.text(`Généré le ${new Date().toLocaleDateString('fr-FR')} à ${new Date().toLocaleTimeString('fr-FR')}`, pageWidth / 2, pageHeight - 20, { align: 'center' })
+    try { doc.addImage(imgLogo, 'PNG', pageWidth / 2 - 25, 40, 50, 50) } catch (e) {}
 
-    // PAGE 2
-    doc.addPage(); doc.setFontSize(18); doc.setTextColor(15, 23, 42); doc.text("Synthèse de l'audit", margin, 25); doc.setDrawColor(226, 232, 240); doc.line(margin, 30, pageWidth - margin, 30)
-    const cardY = 40; const cardH = 25; const cardW = (contentWidth - 15) / 4
+    doc.setFontSize(32); doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold')
+    doc.text("RAPPORT D'AUDIT", pageWidth / 2, 110, { align: 'center' })
+    doc.setFontSize(24); doc.setTextColor(...COLORS.accent)
+    doc.text("GEMBA", pageWidth / 2, 122, { align: 'center' })
+
+    doc.setDrawColor(...COLORS.accent); doc.setLineWidth(1)
+    doc.line(pageWidth / 2 - 20, 130, pageWidth / 2 + 20, 130)
+
+    doc.setFontSize(16); doc.setTextColor(200, 200, 200); doc.setFont('helvetica', 'normal')
+    doc.text(`Ligne : ${selectedAudit.ligne}`, pageWidth / 2, 145, { align: 'center' })
+    doc.text(`UAP : ${selectedAudit.uap}`, pageWidth / 2, 153, { align: 'center' })
+    doc.setFontSize(14); doc.text(`Date : ${new Date(selectedAudit.date).toLocaleDateString('fr-FR')}`, pageWidth / 2, 170, { align: 'center' })
+
+    doc.setFontSize(10); doc.setTextColor(150, 150, 150)
+    doc.text(`Document généré le ${new Date().toLocaleDateString('fr-FR')} à ${new Date().toLocaleTimeString('fr-FR')}`, pageWidth / 2, pageHeight - 20, { align: 'center' })
+
+    // --- PAGE 2 : SYNTHÈSE ---
+    doc.addPage()
+    doc.setFillColor(...COLORS.primary)
+    doc.rect(0, 0, pageWidth, 25, 'F')
+    doc.setFontSize(12); doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold')
+    doc.text("SYNTHÈSE DE L'AUDIT", margin, 16)
+    doc.setFontSize(10); doc.setFont('helvetica', 'normal')
+    doc.text(`Ligne ${selectedAudit.ligne} - ${new Date(selectedAudit.date).toLocaleDateString('fr-FR')}`, pageWidth - margin, 16, { align: 'right' })
+
+    let currentY = 45
+    const cardW = (contentWidth - 15) / 4
+    const cardH = 30
     const drawCard = (x, label, value, color) => {
-      doc.setFillColor(color[0], color[1], color[2], 0.1); doc.setDrawColor(color[0], color[1], color[2]); doc.roundedRect(x, cardY, cardW, cardH, 3, 3, 'FD')
-      doc.setFontSize(9); doc.setTextColor(100, 116, 139); doc.text(label, x + cardW/2, cardY + 8, { align: 'center' })
-      doc.setFontSize(18); doc.setTextColor(color[0], color[1], color[2]); doc.text(value.toString(), x + cardW/2, cardY + 18, { align: 'center' })
+      doc.setFillColor(...COLORS.light); doc.setDrawColor(...COLORS.border); doc.roundedRect(x, currentY, cardW, cardH, 2, 2, 'FD')
+      doc.setFillColor(...color); doc.roundedRect(x, currentY, 4, cardH, 2, 2, 'F')
+      doc.setFontSize(9); doc.setTextColor(...COLORS.textMuted); doc.text(label, x + 10, currentY + 10)
+      doc.setFontSize(20); doc.setTextColor(...color); doc.setFont('helvetica', 'bold'); doc.text(value.toString(), x + 10, currentY + 22)
+      doc.setFont('helvetica', 'normal')
     }
-    drawCard(margin, 'OK', okCount, [16, 185, 129]); drawCard(margin + cardW + 5, 'NOK', nokCount, [239, 68, 68]); drawCard(margin + (cardW + 5) * 2, 'N/A', naCount, [148, 163, 184]); drawCard(margin + (cardW + 5) * 3, 'TOTAL', totalQuestions, [59, 130, 246])
+    drawCard(margin, 'CONFORMES (OK)', okCount, COLORS.success)
+    drawCard(margin + cardW + 5, 'NON-CONFORMES (NOK)', nokCount, COLORS.danger)
+    drawCard(margin + (cardW + 5) * 2, 'NON APPLICABLES', naCount, COLORS.textMuted)
+    drawCard(margin + (cardW + 5) * 3, 'TOTAL QUESTIONS', totalQuestions, COLORS.accent)
 
-    const infoY = cardY + cardH + 10
-    doc.setFillColor(248, 250, 252); doc.setDrawColor(226, 232, 240); doc.roundedRect(margin, infoY, contentWidth, 35, 3, 3, 'FD')
-    doc.setFontSize(10); doc.setTextColor(15, 23, 42); doc.text(`Auditeurs :`, margin + 5, infoY + 10)
-    doc.setFont('helvetica', 'bold'); const splitAuditors = doc.splitTextToSize(uniqueAuditors || '—', contentWidth - 40); doc.text(splitAuditors, margin + 30, infoY + 10)
-    doc.setFont('helvetica', 'normal'); doc.text(`Score Global :`, pageWidth - margin - 60, infoY + 25); doc.setFont('helvetica', 'bold'); doc.setFontSize(16)
-    doc.setTextColor(globalScore >= 87 ? 16 : globalScore >= 85 ? 245 : 239, globalScore >= 87 ? 185 : globalScore >= 85 ? 158 : 68, globalScore >= 87 ? 129 : globalScore >= 85 ? 11 : 68)
-    doc.text(`${globalScore} %`, pageWidth - margin - 10, infoY + 25, { align: 'right' })
+    currentY += cardH + 15
+    doc.setFillColor(...COLORS.light); doc.setDrawColor(...COLORS.border); doc.roundedRect(margin, currentY, contentWidth, 25, 2, 2, 'FD')
+    doc.setFontSize(11); doc.setTextColor(...COLORS.primary); doc.setFont('helvetica', 'bold')
+    doc.text("SCORE GLOBAL DE L'AUDIT", margin + 10, currentY + 10)
+    doc.setFontSize(22); doc.setTextColor(...(globalScore >= 85 ? COLORS.success : COLORS.danger))
+    doc.text(`${globalScore} %`, margin + 10, currentY + 20)
+    const barWidth = contentWidth - 80
+    doc.setFillColor(...COLORS.border); doc.roundedRect(margin + 60, currentY + 12, barWidth, 6, 3, 3, 'F')
+    doc.setFillColor(...(globalScore >= 85 ? COLORS.success : COLORS.danger)); doc.roundedRect(margin + 60, currentY + 12, (globalScore / 100) * barWidth, 6, 3, 3, 'F')
+    doc.setFont('helvetica', 'normal')
 
-    let currentY = infoY + 45
-    doc.setFontSize(14); doc.setTextColor(15, 23, 42); doc.setFont('helvetica', 'bold'); doc.text("Scores par pilier (5M)", margin, currentY); currentY += 8
+    currentY += 40
+    doc.setFillColor(...COLORS.light); doc.setDrawColor(...COLORS.border); doc.roundedRect(margin, currentY, contentWidth, 20, 2, 2, 'FD')
+    doc.setFontSize(10); doc.setTextColor(...COLORS.textMuted)
+    doc.text("Auditeurs :", margin + 10, currentY + 12)
+    doc.setFont('helvetica', 'bold'); doc.setTextColor(...COLORS.primary)
+    doc.text(uniqueAuditors || '—', margin + 35, currentY + 12)
+    doc.setFont('helvetica', 'normal')
+
+    currentY += 35
+    doc.setFontSize(12); doc.setTextColor(...COLORS.primary); doc.setFont('helvetica', 'bold')
+    doc.text("PERFORMANCE PAR PILIER (5M)", margin, currentY)
+    currentY += 8
+
     const mScores = {}
     rows.forEach(r => { const m = r.point_m; if (!mScores[m]) mScores[m] = { ok: 0, nok: 0 }; if (r.reponse === 'OK') mScores[m].ok++; if (r.reponse === 'NOK') mScores[m].nok++ })
     const pillars = Object.entries(mScores).map(([name, s]) => ({ name, ok: s.ok, nok: s.nok, score: (s.ok + s.nok) > 0 ? Math.round((s.ok / (s.ok + s.nok)) * 100) : 0 }))
-    const pW = (contentWidth - 10) / 3; const pH = 25; doc.setFont('helvetica', 'normal')
+    const pW = (contentWidth - 10) / 2; const pH = 20
+    doc.setFont('helvetica', 'normal')
     pillars.forEach((p, i) => {
-      const x = margin + (i % 3) * (pW + 5); const y = currentY + Math.floor(i / 3) * (pH + 5)
-      doc.setFillColor(248, 250, 252); doc.setDrawColor(226, 232, 240); doc.roundedRect(x, y, pW, pH, 3, 3, 'FD')
-      doc.setFontSize(9); doc.setTextColor(100, 116, 139); doc.text(p.name.substring(0, 25), x + pW/2, y + 8, { align: 'center' })
-      doc.setFontSize(16); doc.setFont('helvetica', 'bold'); doc.setTextColor(p.score >= 87 ? 16 : p.score >= 85 ? 245 : 239, p.score >= 87 ? 185 : p.score >= 85 ? 158 : 68, p.score >= 87 ? 129 : p.score >= 85 ? 11 : 68)
-      doc.text(`${p.score}%`, x + pW/2, y + 18, { align: 'center' }); doc.setFont('helvetica', 'normal')
+      const x = margin + (i % 2) * (pW + 10); const y = currentY + Math.floor(i / 2) * (pH + 8)
+      doc.setFillColor(...COLORS.light); doc.setDrawColor(...COLORS.border); doc.roundedRect(x, y, pW, pH, 2, 2, 'FD')
+      doc.setFontSize(9); doc.setTextColor(...COLORS.textMuted); doc.text(p.name, x + 5, y + 7)
+      doc.setFontSize(14); doc.setFont('helvetica', 'bold'); doc.setTextColor(...(p.score >= 85 ? COLORS.success : COLORS.danger))
+      doc.text(`${p.score}%`, x + pW - 10, y + 14, { align: 'right' })
+      doc.setFillColor(...COLORS.border); doc.roundedRect(x + 5, y + 12, pW - 30, 4, 2, 2, 'F')
+      doc.setFillColor(...(p.score >= 85 ? COLORS.success : COLORS.danger)); doc.roundedRect(x + 5, y + 12, ((p.score / 100) * (pW - 30)), 4, 2, 2, 'F')
+      doc.setFont('helvetica', 'normal')
     })
 
-    // PAGE 3
-    doc.addPage(); doc.setFontSize(18); doc.setTextColor(15, 23, 42); doc.text("Détail de l'audit", margin, 25)
+    // --- PAGE 3 : DÉTAIL ---
+    doc.addPage()
+    doc.setFillColor(...COLORS.primary); doc.rect(0, 0, pageWidth, 25, 'F')
+    doc.setFontSize(12); doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.text("DÉTAIL DE L'AUDIT", margin, 16)
+
     const tableData = rows.map((r, index) => {
       const dbPhotos = getDbPhotosForRow(r)
       return [index + 1, r.point_m, r.question, r.reponse, r.action !== '-' ? r.action : '', dbPhotos.length > 0 ? `${dbPhotos.length} photo(s)` : '—']
     })
+    
     autoTable(doc, {
-      startY: 30, head: [['N°', 'Point M', 'Question', 'Statut', 'Action', 'Photos']], body: tableData, theme: 'grid',
-      headStyles: { fillColor: [15, 23, 42], textColor: 255, fontSize: 9, fontStyle: 'bold' },
-      styles: { fontSize: 8, cellPadding: 3, valign: 'middle', lineColor: [226, 232, 240] },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
-      columnStyles: { 0: { cellWidth: 10, halign: 'center' }, 1: { cellWidth: 25 }, 2: { cellWidth: 60 }, 3: { cellWidth: 15, halign: 'center', fontStyle: 'bold' }, 4: { cellWidth: 45 }, 5: { cellWidth: 20, halign: 'center' } },
-      didParseCell: function (data) { if (data.section === 'body' && data.column.index === 3) { if (data.cell.raw === 'OK') data.cell.styles.textColor = [16, 185, 129]; if (data.cell.raw === 'NOK') data.cell.styles.textColor = [239, 68, 68] } }
+      startY: 35, head: [['N°', 'Point M', 'Question', 'Statut', 'Action Corrective', 'Preuves']], body: tableData, theme: 'plain',
+      headStyles: { fillColor: COLORS.primary, textColor: 255, fontSize: 9, fontStyle: 'bold', cellPadding: 4 },
+      styles: { fontSize: 8, cellPadding: 4, valign: 'middle', textColor: COLORS.primary, lineColor: COLORS.border, lineWidth: 0.1 },
+      alternateRowStyles: { fillColor: COLORS.light },
+      columnStyles: { 0: { cellWidth: 10, halign: 'center', fontStyle: 'bold' }, 1: { cellWidth: 25 }, 2: { cellWidth: 65, fontStyle: 'bold' }, 3: { cellWidth: 20, halign: 'center', fontStyle: 'bold' }, 4: { cellWidth: 40, textColor: COLORS.warning }, 5: { cellWidth: 20, halign: 'center' } },
+      didParseCell: function (data) { if (data.section === 'body' && data.column.index === 3) { if (data.cell.raw === 'OK') data.cell.styles.textColor = COLORS.success; if (data.cell.raw === 'NOK') data.cell.styles.textColor = COLORS.danger } }
     })
 
-    // PAGE 4
+    // --- PAGE 4 : NOK ---
     const nokQuestions = rows.map((r, index) => ({ ...r, index })).filter(r => r.reponse === 'NOK')
     if (nokQuestions.length > 0) {
-      doc.addPage(); doc.setFontSize(18); doc.setTextColor(15, 23, 42); doc.text("Détail des non-conformités (NOK)", margin, 25); doc.setDrawColor(226, 232, 240); doc.line(margin, 30, pageWidth - margin, 30)
-      let yPos = 40
+      doc.addPage()
+      doc.setFillColor(...COLORS.danger); doc.rect(0, 0, pageWidth, 25, 'F')
+      doc.setFontSize(12); doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.text("ANALYSE DES NON-CONFORMITÉS", margin, 16)
+      let yPos = 35
       for (const q of nokQuestions) {
         const dbPhotos = getDbPhotosForRow(q)
         const dbPhotosBase64 = await Promise.all(dbPhotos.map(p => urlToBase64(p.url)))
-        const validDbPhotos = dbPhotosBase64.filter(p => p !== null)
+        const validPhotos = dbPhotosBase64.filter(p => p !== null)
+        const estimatedHeight = 30 + (validPhotos.length > 0 ? Math.ceil(validPhotos.length / 2) * 60 : 0)
+        if (yPos + estimatedHeight > pageHeight - 25) { doc.addPage(); yPos = 25 }
 
-        const estimatedHeight = 25 + (validDbPhotos.length > 0 ? Math.ceil(validDbPhotos.length / 2) * 65 : 0)
-        if (yPos + estimatedHeight > pageHeight - 20) { doc.addPage(); yPos = 20 }
-
-        doc.setFillColor(239, 68, 68); doc.roundedRect(margin, yPos, 18, 7, 1, 1, 'F')
-        doc.setFontSize(9); doc.setTextColor(255); doc.setFont('helvetica', 'bold'); doc.text('NOK', margin + 9, yPos + 4.5, { align: 'center' })
-        doc.setFontSize(11); doc.setTextColor(15, 23, 42); doc.text(`Q${q.index + 1}`, margin + 22, yPos + 5)
-        doc.setFontSize(10); doc.setFont('helvetica', 'bold')
-        const title = `[${q.point_m}] ${q.question}`
-        const splitTitle = doc.splitTextToSize(title, contentWidth - 30)
-        doc.text(splitTitle, margin + 30, yPos + 5); yPos += splitTitle.length * 5 + 5
+        doc.setFillColor(...COLORS.light); doc.setDrawColor(...COLORS.border); doc.roundedRect(margin, yPos, contentWidth, 22, 2, 2, 'FD')
+        doc.setFillColor(...COLORS.danger); doc.roundedRect(margin + 5, yPos + 5, 12, 5, 1, 1, 'F')
+        doc.setFontSize(7); doc.setTextColor(255); doc.setFont('helvetica', 'bold'); doc.text('NOK', margin + 11, yPos + 8.5, { align: 'center' })
+        doc.setFontSize(9); doc.setTextColor(...COLORS.primary); doc.text(`Q${q.index + 1} - [${q.point_m}]`, margin + 22, yPos + 9)
+        doc.setFont('helvetica', 'normal')
+        const splitTitle = doc.splitTextToSize(q.question, contentWidth - 30)
+        doc.text(splitTitle, margin + 22, yPos + 14)
+        yPos += 25
 
         if (q.action && q.action !== '-') {
-          doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139)
-          const splitAction = doc.splitTextToSize(`Action corrective : ${q.action}`, contentWidth - 30)
-          doc.text(splitAction, margin + 30, yPos); yPos += splitAction.length * 4 + 5
+          doc.setFontSize(8); doc.setTextColor(...COLORS.warning); doc.setFont('helvetica', 'bold')
+          doc.text("ACTION CORRECTIVE :", margin + 5, yPos)
+          doc.setFont('helvetica', 'normal')
+          const splitAction = doc.splitTextToSize(q.action, contentWidth - 45)
+          doc.text(splitAction, margin + 40, yPos)
+          yPos += splitAction.length * 4 + 5
         }
 
-        if (validDbPhotos.length > 0) {
-          const imgWidth = (contentWidth - 30 - 10) / 2; const imgHeight = 60
-          validDbPhotos.forEach((photo, pIdx) => {
-            const xPos = margin + 30 + (pIdx % 2) * (imgWidth + 10)
-            if (pIdx > 0 && pIdx % 2 === 0) yPos += imgHeight + 10
-            if (yPos + imgHeight > pageHeight - 20) { doc.addPage(); yPos = 20 }
-            doc.setDrawColor(226, 232, 240); doc.setFillColor(248, 250, 252); doc.roundedRect(xPos - 2, yPos - 2, imgWidth + 4, imgHeight + 4, 2, 2, 'FD')
+        if (validPhotos.length > 0) {
+          const imgWidth = (contentWidth - 10) / 2; const imgHeight = 55
+          validPhotos.forEach((photo, pIdx) => {
+            const xPos = margin + (pIdx % 2) * (imgWidth + 10)
+            if (pIdx > 0 && pIdx % 2 === 0) yPos += imgHeight + 5
+            if (yPos + imgHeight > pageHeight - 20) { doc.addPage(); yPos = 25 }
+            doc.setDrawColor(...COLORS.border); doc.setFillColor(...COLORS.light); doc.roundedRect(xPos - 2, yPos - 2, imgWidth + 4, imgHeight + 4, 2, 2, 'FD')
             doc.addImage(photo, 'JPEG', xPos, yPos, imgWidth, imgHeight)
           })
-          yPos += imgHeight + 15
-        } else { yPos += 10 }
-        doc.setDrawColor(241, 245, 249); doc.line(margin, yPos - 5, pageWidth - margin, yPos - 5)
+          yPos += imgHeight + 10
+        } else { yPos += 5 }
+        doc.setDrawColor(...COLORS.border); doc.setLineWidth(0.5); doc.line(margin, yPos, pageWidth - margin, yPos)
+        yPos += 10
       }
     }
 
     const pageCount = doc.internal.getNumberOfPages()
     for (let i = 2; i <= pageCount; i++) {
-      doc.setPage(i); doc.setFontSize(8); doc.setTextColor(148, 163, 184)
+      doc.setPage(i); doc.setDrawColor(...COLORS.border); doc.setLineWidth(0.5); doc.line(margin, pageHeight - 15, pageWidth - margin, pageHeight - 15)
+      doc.setFontSize(8); doc.setTextColor(...COLORS.textMuted)
       doc.text(`WKW Tunisie - Rapport d'Audit Gemba`, margin, pageHeight - 10)
       doc.text(`Page ${i} / ${pageCount}`, pageWidth - margin, pageHeight - 10, { align: 'right' })
     }
@@ -272,7 +315,6 @@ export default function RapportGemba() {
       <div className="flex-between" style={{ marginBottom: '1.5rem' }}>
         <h1 style={{ fontSize: '1.5rem', margin: 0 }}>Rapport d'Audit Gemba</h1>
       </div>
-
       <div className="card">
         <h2 className="card-title">Sélectionner un audit</h2>
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
@@ -287,28 +329,19 @@ export default function RapportGemba() {
           </button>
         </div>
       </div>
-
       {selectedAudit && (
         <div className="card" style={{ marginTop: '2rem' }}>
           <h2 className="card-title">Photos (Synchronisées avec le Plan d'Action)</h2>
           <p className="muted" style={{ marginBottom: '1rem', fontSize: '0.85rem' }}>Les photos ajoutées ici sont directement enregistrées dans le Plan d'Action Gemba.</p>
-          
           <div className="table-wrapper">
             <table className="data-table">
               <thead>
-                <tr>
-                  <th>Point M</th>
-                  <th>Question</th>
-                  <th>Statut</th>
-                  <th>Action / Commentaire</th>
-                  <th style={{ width: '300px' }}>Photos</th>
-                </tr>
+                <tr><th>Point M</th><th>Question</th><th>Statut</th><th>Action / Commentaire</th><th style={{ width: '300px' }}>Photos</th></tr>
               </thead>
               <tbody>
                 {selectedAudit.rows.map((r, i) => {
                   const isNok = String(r.reponse).toUpperCase() === 'NOK'
                   const dbPhotos = getDbPhotosForRow(r)
-                  
                   return (
                     <tr key={i} style={{ background: isNok ? 'rgba(239, 68, 68, 0.05)' : 'transparent' }}>
                       <td style={{ color: 'var(--text-muted)' }}>{r.point_m}</td>
@@ -322,7 +355,10 @@ export default function RapportGemba() {
                               {dbPhotos.map((p, pIdx) => (
                                 <div key={pIdx} style={{ position: 'relative' }}>
                                   <img src={p.url} alt={`Preuve ${pIdx + 1}`} style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px', border: '1px solid var(--primary)' }} />
-                                  <button onClick={() => handleRemovePhoto(p)} style={{ position: 'absolute', top: -5, right: -5, background: 'var(--danger)', color: 'white', border: 'none', borderRadius: '50%', width: '16px', height: '16px', cursor: 'pointer', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+                                  {/* 🌟 Bouton supprimer uniquement pour l'admin */}
+                                  {isAdmin && (
+                                    <button onClick={() => handleRemovePhoto(p)} style={{ position: 'absolute', top: -5, right: -5, background: 'var(--danger)', color: 'white', border: 'none', borderRadius: '50%', width: '16px', height: '16px', cursor: 'pointer', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+                                  )}
                                 </div>
                               ))}
                             </div>

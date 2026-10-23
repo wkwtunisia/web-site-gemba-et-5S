@@ -229,13 +229,12 @@ export default function TvDashboard() {
     ]
   }, [audits5S, auditsGemba])
 
-
   if (loading) return <div style={{ background: '#0f172a', color: 'white', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '2rem' }}>Chargement des données...</div>
 
   return (
-    <div style={{ background: '#0f172a', color: 'white', minHeight: '100vh', padding: '2rem', fontFamily: 'sans-serif' }}>
+    /* 🌟 MODIFICATION ICI : position fixed, top 0, left 0, 100vw, 100vh, zIndex 9999 */
+    <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 9999, overflowY: 'auto', background: '#0f172a', color: 'white', padding: '2rem', fontFamily: 'sans-serif' }}>
       
-      {/* EN-TÊTE */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', borderBottom: '2px solid #334155', paddingBottom: '1rem' }}>
         <div>
           <h1 style={{ margin: 0, fontSize: '2.5rem', color: '#38bdf8' }}>TABLEAU DE BORD GEMBA / 5S</h1>
@@ -246,7 +245,6 @@ export default function TvDashboard() {
           <div style={{ fontSize: '1.2rem', color: '#94a3b8' }}>{time.toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</div>
         </div>
         
-        {/* 🌟 BLOC SÉPARÉ : TOTAL / GEMBA / 5S */}
         <div style={{ display: 'flex', gap: '1rem', background: '#1e293b', padding: '1rem 1.5rem', borderRadius: '10px', borderLeft: `8px solid #38bdf8` }}>
           <div style={{ textAlign: 'center', paddingRight: '1.5rem', borderRight: '1px solid #334155' }}>
             <div style={{ fontSize: '0.9rem', color: '#94a3b8', textTransform: 'uppercase', marginBottom: '0.2rem' }}>Total M-1</div>
@@ -265,7 +263,6 @@ export default function TvDashboard() {
         </div>
       </div>
 
-      {/* LIGNE 1 : PILOTES ET LIGNES */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginBottom: '2rem' }}>
         
         <div style={{ background: '#1e293b', padding: '1.5rem', borderRadius: '10px' }}>
@@ -339,7 +336,6 @@ export default function TvDashboard() {
         </div>
       </div>
 
-      {/* LIGNE 2 : QUESTIONS */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginBottom: '2rem' }}>
         
         <div style={{ background: '#1e293b', padding: '1.5rem', borderRadius: '10px' }}>
@@ -391,7 +387,6 @@ export default function TvDashboard() {
         </div>
       </div>
 
-      {/* LIGNE 3 : MOYENNE UAP */}
       <div style={{ background: '#1e293b', padding: '1.5rem', borderRadius: '10px' }}>
         <h2 style={{ fontSize: '1.5rem', marginTop: 0, color: '#e2e8f0', marginBottom: '1.5rem' }}>🏭 MOYENNE DES RÉSULTATS PAR UAP (M-1)</h2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem' }}>

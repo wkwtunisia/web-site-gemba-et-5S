@@ -1,3 +1,4 @@
+import TvDashboard from './pages/TvDashboard'
 import { useState, useEffect } from 'react'
 import Sidebar from './components/Sidebar'
 import PlanAction from './components/PlanAction'
@@ -122,7 +123,8 @@ export default function App() {
           </div>
         )}
 
-        {currentView === 'mes_actions' && <MesActions userEmail={session.user.email} />}
+        {currentView === 'tv' && <TvDashboard />}
+          {currentView === 'mes_actions' && <MesActions userEmail={session.user.email} />}
         {currentView === 'parametres' && <Parametres />}
         {currentView === 'historique' && <HistoriqueActions userEmail={session.user.email} role={role} />}
 

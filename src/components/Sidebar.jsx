@@ -11,6 +11,7 @@ export default function Sidebar({ currentView, setCurrentView, role, userEmail }
       
       <div className="sidebar-nav">
         <div className="sidebar-section">Mon Espace</div>
+        <button className={`nav-item ${currentView === 'tv' ? 'active' : ''}`} onClick={() => setCurrentView('tv')}>📺 Dashboard TV</button>
         <button className={`nav-item ${currentView === 'mes_actions' ? 'active' : ''}`} onClick={() => setCurrentView('mes_actions')}>
           📌 Mes Actions
         </button>

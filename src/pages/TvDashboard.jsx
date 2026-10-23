@@ -34,9 +34,7 @@ const getUap5S = (zone) => {
 
 const getColorGemba = (score) => score >= 90 ? '#10b981' : score >= 85 ? '#f59e0b' : '#ef4444'
 const getColor5S = (score) => score >= 86 ? '#10b981' : score >= 80 ? '#f59e0b' : '#ef4444'
-const getColorGlobal = (score) => score >= 90 ? '#10b981' : score >= 85 ? '#f59e0b' : '#ef4444'
 
-// 🌟 TÉLÉCHARGEMENT PAR PAQUETS (PAGINATION) POUR ÉVITER LA LIMITE DE 1000 LIGNES
 const fetchAll = async (tableName) => {
   let allData = []
   let from = 0
@@ -44,22 +42,9 @@ const fetchAll = async (tableName) => {
   let hasMore = true
 
   while (hasMore) {
-    const { data, error } = await supabase
-      .from(tableName)
-      .select('*')
-      .range(from, from + step - 1)
-
-    if (error) {
-      console.error(`Erreur sur ${tableName}:`, error)
-      break
-    }
-    
-    if (data.length === 0) {
-      hasMore = false
-    } else {
-      allData = [...allData, ...data]
-      from += step
-    }
+    const { data, error } = await supabase.from(tableName).select('*').range(from, from + step - 1)
+    if (error) { console.error(`Erreur sur ${tableName}:`, error); break }
+    if (data.length === 0) { hasMore = false } else { allData = [...allData, ...data]; from += step }
   }
   return allData
 }
@@ -81,7 +66,6 @@ export default function TvDashboard() {
       const actionsData = await fetchActions()
       const res5S = await fetchAll('audits')
       const resGemba = await fetchAll('gemba_audits')
-
       setActions(actionsData || [])
       setAudits5S(res5S || [])
       setAuditsGemba(resGemba || [])
@@ -97,10 +81,6 @@ export default function TvDashboard() {
     const interval = setInterval(loadData, 300000)
     return () => clearInterval(interval)
   }, [])
-
-  const totalActions = actions.length
-  const actionsRealisees = actions.filter(a => a.progression === 100).length
-  const tauxGlobal = totalActions > 0 ? Math.round((actionsRealisees / totalActions) * 100) : 0
 
   const topPilotes = useMemo(() => {
     const stats = {}
@@ -124,14 +104,25 @@ export default function TvDashboard() {
     const targetYear = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear()
     const monthStr = String(targetMonth).padStart(2, '0')
     const yearStr = String(targetYear)
-    
     const str = String(dateStr)
-    return str.includes(`${yearStr}-${monthStr}`) || 
-           str.includes(`${monthStr}/${yearStr}`) || 
-           str.includes(`${monthStr}-${yearStr}`)
+    return str.includes(`${yearStr}-${monthStr}`) || str.includes(`${monthStr}/${yearStr}`) || str.includes(`${monthStr}-${yearStr}`)
   }
 
-  const classementsM1 = useMemo(() => {
+  const truncate = (str, max = 30) => str.length > max ? str.substring(0, max) + '...' : str
+
+  const totalAuditsM1 = useMemo(() => {
+    let count5S = 0
+    audits5S.forEach(a => { if (isPrevMonth(a.date)) count5S++ })
+
+    const gembaSessions = new Set()
+    auditsGemba.forEach(a => {
+      if (isPrevMonth(a.date)) gembaSessions.add(`${a.date}|${a.ligne}`)
+    })
+    
+    return { total: count5S + gembaSessions.size, count5S, countGemba: gembaSessions.size }
+  }, [audits5S, auditsGemba])
+
+  const classementsLignesM1 = useMemo(() => {
     const stats5S = {}
     audits5S.forEach(a => {
       if (!isPrevMonth(a.date) || !a.zone) return
@@ -144,23 +135,54 @@ export default function TvDashboard() {
     const gembaGroups = {}
     auditsGemba.forEach(a => {
       if (!isPrevMonth(a.date) || !a.ligne) return
-      const key = `${a.date}|${a.ligne}`
-      if (!gembaGroups[key]) gembaGroups[key] = { ligne: a.ligne, ok: 0, total: 0 }
+      const key = a.ligne.trim()
+      if (!gembaGroups[key]) gembaGroups[key] = { ok: 0, total: 0 }
       gembaGroups[key].total++
       if (String(a.reponse).toUpperCase() === 'OK') gembaGroups[key].ok++
     })
-
-    const statsGemba = {}
-    Object.values(gembaGroups).forEach(g => {
-      if (!statsGemba[g.ligne]) statsGemba[g.ligne] = { sum: 0, count: 0 }
-      statsGemba[g.ligne].sum += (g.ok / g.total) * 100
-      statsGemba[g.ligne].count++
-    })
-    const listGemba = Object.entries(statsGemba).map(([ligne, data]) => ({ name: ligne, taux: Math.round(data.sum / data.count) })).sort((a, b) => b.taux - a.taux)
+    const listGemba = Object.entries(gembaGroups).map(([ligne, data]) => ({ name: ligne, taux: Math.round((data.ok / data.total) * 100) })).sort((a, b) => b.taux - a.taux)
 
     return {
-      top3_5S: list5S.slice(0, 3), bottom3_5S: list5S.slice(-3).reverse(),
-      top3_Gemba: listGemba.slice(0, 3), bottom3_Gemba: listGemba.slice(-3).reverse()
+      top3_5S: list5S.slice(0, 3).map(l => ({...l, name: truncate(l.name)})),
+      bottom3_5S: list5S.slice(-3).reverse().map(l => ({...l, name: truncate(l.name)})),
+      top3_Gemba: listGemba.slice(0, 3).map(l => ({...l, name: truncate(l.name)})),
+      bottom3_Gemba: listGemba.slice(-3).reverse().map(l => ({...l, name: truncate(l.name)}))
+    }
+  }, [audits5S, auditsGemba])
+
+  const classementsQuestionsM1 = useMemo(() => {
+    const stats5S = {}
+    audits5S.forEach(a => {
+      if (!isPrevMonth(a.date)) return
+      const cps = a.checkpoints || []
+      cps.forEach(cp => {
+        if (!cp.q) return
+        const q = cp.q.trim()
+        if (!stats5S[q]) stats5S[q] = { ok: 0, total: 0 }
+        stats5S[q].total++
+        if (String(cp.s).toUpperCase() === 'OK') stats5S[q].ok++
+      })
+    })
+    const list5S = Object.entries(stats5S).map(([q, data]) => ({ name: q, taux: Math.round((data.ok / data.total) * 100), total: data.total }))
+      .filter(q => q.total >= 2).sort((a, b) => b.taux - a.taux)
+
+    const statsGemba = {}
+    auditsGemba.forEach(a => {
+      if (!isPrevMonth(a.date)) return
+      const q = (a.question || '').trim()
+      if (!q) return
+      if (!statsGemba[q]) statsGemba[q] = { ok: 0, total: 0 }
+      statsGemba[q].total++
+      if (String(a.reponse).toUpperCase() === 'OK') statsGemba[q].ok++
+    })
+    const listGemba = Object.entries(statsGemba).map(([q, data]) => ({ name: q, taux: Math.round((data.ok / data.total) * 100), total: data.total }))
+      .filter(q => q.total >= 2).sort((a, b) => b.taux - a.taux)
+
+    return {
+      top3_5S: list5S.slice(0, 3).map(q => ({ ...q, name: truncate(q.name) })),
+      bottom3_5S: list5S.slice(-3).reverse().map(q => ({ ...q, name: truncate(q.name) })),
+      top3_Gemba: listGemba.slice(0, 3).map(q => ({ ...q, name: truncate(q.name) })),
+      bottom3_Gemba: listGemba.slice(-3).reverse().map(q => ({ ...q, name: truncate(q.name) }))
     }
   }, [audits5S, auditsGemba])
 
@@ -179,31 +201,23 @@ export default function TvDashboard() {
     const gembaGroups = {} 
     auditsGemba.forEach(a => {
       if (!isPrevMonth(a.date)) return
-      
       let uap = (a.uap || '').trim().toUpperCase()
       if (uap.includes('UAP 1') || uap.includes('UAP1')) uap = 'UAP 1'
       else if (uap.includes('UAP 2') || uap.includes('UAP2')) uap = 'UAP 2'
       else if (uap.includes('LOG')) uap = 'Logistique'
       else return
-
       const ligne = (a.ligne || '').trim()
       if (!gembaGroups[uap]) gembaGroups[uap] = {}
       if (!gembaGroups[uap][ligne]) gembaGroups[uap][ligne] = { ok: 0, total: 0 }
-      
       gembaGroups[uap][ligne].total++
       if (String(a.reponse).toUpperCase() === 'OK') gembaGroups[uap][ligne].ok++
     })
 
     const moyGemba = {}
     Object.entries(gembaGroups).forEach(([uap, lignes]) => {
-      let totalScore = 0
-      let countLignes = 0
-
-      Object.entries(lignes).forEach(([nomLigne, data]) => {
-        if (data.total > 0) {
-          totalScore += (data.ok / data.total) * 100
-          countLignes++
-        }
+      let totalScore = 0, countLignes = 0
+      Object.values(lignes).forEach(data => {
+        if (data.total > 0) { totalScore += (data.ok / data.total) * 100; countLignes++ }
       })
       moyGemba[uap] = countLignes > 0 ? totalScore / countLignes : 0
     })
@@ -220,6 +234,8 @@ export default function TvDashboard() {
 
   return (
     <div style={{ background: '#0f172a', color: 'white', minHeight: '100vh', padding: '2rem', fontFamily: 'sans-serif' }}>
+      
+      {/* EN-TÊTE */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem', borderBottom: '2px solid #334155', paddingBottom: '1rem' }}>
         <div>
           <h1 style={{ margin: 0, fontSize: '2.5rem', color: '#38bdf8' }}>TABLEAU DE BORD GEMBA / 5S</h1>
@@ -229,26 +245,42 @@ export default function TvDashboard() {
           <div style={{ fontSize: '2rem', fontWeight: 'bold' }}>{time.toLocaleTimeString('fr-FR')}</div>
           <div style={{ fontSize: '1.2rem', color: '#94a3b8' }}>{time.toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</div>
         </div>
-        <div style={{ background: '#1e293b', padding: '1rem 2rem', borderRadius: '10px', borderLeft: `8px solid ${getColorGlobal(tauxGlobal)}` }}>
-          <div style={{ fontSize: '1rem', color: '#94a3b8' }}>TAUX GLOBAL ACTIONS</div>
-          <div style={{ fontSize: '3rem', fontWeight: 'bold', color: getColorGlobal(tauxGlobal) }}>{tauxGlobal}%</div>
+        
+        {/* 🌟 BLOC SÉPARÉ : TOTAL / GEMBA / 5S */}
+        <div style={{ display: 'flex', gap: '1rem', background: '#1e293b', padding: '1rem 1.5rem', borderRadius: '10px', borderLeft: `8px solid #38bdf8` }}>
+          <div style={{ textAlign: 'center', paddingRight: '1.5rem', borderRight: '1px solid #334155' }}>
+            <div style={{ fontSize: '0.9rem', color: '#94a3b8', textTransform: 'uppercase', marginBottom: '0.2rem' }}>Total M-1</div>
+            <div style={{ fontSize: '2.5rem', fontWeight: 'bold', color: '#38bdf8', lineHeight: '1' }}>{totalAuditsM1.total}</div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '0.4rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem' }}>
+              <span style={{ color: '#94a3b8', width: '50px' }}>Gemba</span>
+              <span style={{ fontWeight: 'bold', color: '#38bdf8', fontSize: '1.2rem' }}>{totalAuditsM1.countGemba}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.9rem' }}>
+              <span style={{ color: '#94a3b8', width: '50px' }}>5S</span>
+              <span style={{ fontWeight: 'bold', color: '#f59e0b', fontSize: '1.2rem' }}>{totalAuditsM1.count5S}</span>
+            </div>
+          </div>
         </div>
       </div>
 
+      {/* LIGNE 1 : PILOTES ET LIGNES */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginBottom: '2rem' }}>
+        
         <div style={{ background: '#1e293b', padding: '1.5rem', borderRadius: '10px' }}>
-          <h2 style={{ fontSize: '1.5rem', marginTop: 0, color: '#e2e8f0', marginBottom: '2rem' }}>🏆 TOP 5 PILOTES (Actions)</h2>
+          <h2 style={{ fontSize: '1.5rem', marginTop: 0, color: '#e2e8f0', marginBottom: '1.5rem' }}>🏆 TOP 5 PILOTES (Actions)</h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
             {topPilotes.map((p, i) => {
-              const color = getColorGlobal(p.taux)
+              const color = p.taux >= 90 ? '#10b981' : p.taux >= 85 ? '#f59e0b' : '#ef4444'
               return (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '1rem', background: '#0f172a', padding: '0.8rem', borderRadius: '8px' }}>
-                  <div style={{ width: '180px', fontSize: '0.95rem', fontWeight: 'bold', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                  <div style={{ width: '160px', fontSize: '0.95rem', fontWeight: 'bold', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
                   <div style={{ flex: 1, background: '#334155', height: '16px', borderRadius: '8px', overflow: 'hidden' }}>
                     <div style={{ width: `${p.taux}%`, background: color, height: '100%' }}></div>
                   </div>
                   <div style={{ width: '50px', textAlign: 'right', fontWeight: 'bold', color: color }}>{p.taux}%</div>
-                  <div style={{ width: '100px', fontSize: '0.8rem', color: '#94a3b8', textAlign: 'right' }}>
+                  <div style={{ width: '90px', fontSize: '0.8rem', color: '#94a3b8', textAlign: 'right' }}>
                     <span style={{ color: '#10b981' }}>{p.realises} R</span> / <span style={{ color: '#ef4444' }}>{p.nonRealises} NR</span>
                   </div>
                 </div>
@@ -258,45 +290,46 @@ export default function TvDashboard() {
         </div>
 
         <div style={{ background: '#1e293b', padding: '1.5rem', borderRadius: '10px' }}>
-          <h2 style={{ fontSize: '1.5rem', marginTop: 0, color: '#e2e8f0', marginBottom: '1.5rem' }}>📊 RÉSULTATS DES AUDITS (M-1)</h2>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+          <h2 style={{ fontSize: '1.5rem', marginTop: 0, color: '#e2e8f0', marginBottom: '1rem' }}>📊 CLASSEMENT DES LIGNES (M-1)</h2>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
             <div style={{ background: '#0f172a', padding: '1rem', borderRadius: '8px' }}>
-              <h3 style={{ color: '#38bdf8', textAlign: 'center', margin: '0 0 1rem 0', fontSize: '1.1rem' }}>GEMBA</h3>
+              <h3 style={{ color: '#38bdf8', textAlign: 'center', margin: '0 0 0.5rem 0', fontSize: '1rem' }}>GEMBA</h3>
               <div style={{ marginBottom: '1rem' }}>
-                <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.5rem' }}>TOP 3 🥇</div>
-                {classementsM1.top3_Gemba.map((p, i) => (
-                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4rem 0', borderBottom: '1px solid #1e293b', fontSize: '0.9rem' }}>
-                    <span>{p.name}</span>
+                <div style={{ fontSize: '0.75rem', color: '#10b981', marginBottom: '0.3rem', fontWeight: 'bold' }}>✅ TOP 3</div>
+                {classementsLignesM1.top3_Gemba.map((p, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.2rem 0', borderBottom: '1px solid #1e293b', fontSize: '0.8rem' }}>
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '120px' }}>{p.name}</span>
                     <span style={{ fontWeight: 'bold', color: getColorGemba(p.taux) }}>{p.taux}%</span>
                   </div>
                 ))}
               </div>
               <div>
-                <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.5rem' }}>BOTTOM 3 🚨</div>
-                {classementsM1.bottom3_Gemba.map((p, i) => (
-                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4rem 0', borderBottom: '1px solid #1e293b', fontSize: '0.9rem' }}>
-                    <span>{p.name}</span>
+                <div style={{ fontSize: '0.75rem', color: '#ef4444', marginBottom: '0.3rem', fontWeight: 'bold' }}>⚠️ BOTTOM 3</div>
+                {classementsLignesM1.bottom3_Gemba.map((p, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.2rem 0', borderBottom: '1px solid #1e293b', fontSize: '0.8rem' }}>
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '120px' }}>{p.name}</span>
                     <span style={{ fontWeight: 'bold', color: getColorGemba(p.taux) }}>{p.taux}%</span>
                   </div>
                 ))}
               </div>
             </div>
+
             <div style={{ background: '#0f172a', padding: '1rem', borderRadius: '8px' }}>
-              <h3 style={{ color: '#f59e0b', textAlign: 'center', margin: '0 0 1rem 0', fontSize: '1.1rem' }}>5S</h3>
+              <h3 style={{ color: '#f59e0b', textAlign: 'center', margin: '0 0 0.5rem 0', fontSize: '1rem' }}>5S</h3>
               <div style={{ marginBottom: '1rem' }}>
-                <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.5rem' }}>TOP 3 🥇</div>
-                {classementsM1.top3_5S.map((p, i) => (
-                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4rem 0', borderBottom: '1px solid #1e293b', fontSize: '0.9rem' }}>
-                    <span>{p.name}</span>
+                <div style={{ fontSize: '0.75rem', color: '#10b981', marginBottom: '0.3rem', fontWeight: 'bold' }}>✅ TOP 3</div>
+                {classementsLignesM1.top3_5S.map((p, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.2rem 0', borderBottom: '1px solid #1e293b', fontSize: '0.8rem' }}>
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '120px' }}>{p.name}</span>
                     <span style={{ fontWeight: 'bold', color: getColor5S(p.taux) }}>{p.taux}%</span>
                   </div>
                 ))}
               </div>
               <div>
-                <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '0.5rem' }}>BOTTOM 3 🚨</div>
-                {classementsM1.bottom3_5S.map((p, i) => (
-                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.4rem 0', borderBottom: '1px solid #1e293b', fontSize: '0.9rem' }}>
-                    <span>{p.name}</span>
+                <div style={{ fontSize: '0.75rem', color: '#ef4444', marginBottom: '0.3rem', fontWeight: 'bold' }}>⚠️ BOTTOM 3</div>
+                {classementsLignesM1.bottom3_5S.map((p, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.2rem 0', borderBottom: '1px solid #1e293b', fontSize: '0.8rem' }}>
+                    <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '120px' }}>{p.name}</span>
                     <span style={{ fontWeight: 'bold', color: getColor5S(p.taux) }}>{p.taux}%</span>
                   </div>
                 ))}
@@ -306,27 +339,80 @@ export default function TvDashboard() {
         </div>
       </div>
 
+      {/* LIGNE 2 : QUESTIONS */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginBottom: '2rem' }}>
+        
+        <div style={{ background: '#1e293b', padding: '1.5rem', borderRadius: '10px' }}>
+          <h2 style={{ fontSize: '1.5rem', marginTop: 0, color: '#e2e8f0', marginBottom: '1rem' }}>💡 POINTS FORTS & À AMÉLIORER - GEMBA (M-1)</h2>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+            <div style={{ background: '#0f172a', padding: '1rem', borderRadius: '8px' }}>
+              <div style={{ fontSize: '0.75rem', color: '#10b981', marginBottom: '0.5rem', fontWeight: 'bold' }}>✅ TOP 3 (Points forts)</div>
+              {classementsQuestionsM1.top3_Gemba.map((p, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.2rem 0', borderBottom: '1px solid #1e293b', fontSize: '0.8rem' }}>
+                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '120px' }} title={p.name}>{p.name}</span>
+                  <span style={{ fontWeight: 'bold', color: getColorGemba(p.taux) }}>{p.taux}%</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ background: '#0f172a', padding: '1rem', borderRadius: '8px' }}>
+              <div style={{ fontSize: '0.75rem', color: '#ef4444', marginBottom: '0.5rem', fontWeight: 'bold' }}>⚠️ BOTTOM 3 (À améliorer)</div>
+              {classementsQuestionsM1.bottom3_Gemba.map((p, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.2rem 0', borderBottom: '1px solid #1e293b', fontSize: '0.8rem' }}>
+                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '120px' }} title={p.name}>{p.name}</span>
+                  <span style={{ fontWeight: 'bold', color: getColorGemba(p.taux) }}>{p.taux}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ background: '#1e293b', padding: '1.5rem', borderRadius: '10px' }}>
+          <h2 style={{ fontSize: '1.5rem', marginTop: 0, color: '#e2e8f0', marginBottom: '1rem' }}>💡 POINTS FORTS & À AMÉLIORER - 5S (M-1)</h2>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+            <div style={{ background: '#0f172a', padding: '1rem', borderRadius: '8px' }}>
+              <div style={{ fontSize: '0.75rem', color: '#10b981', marginBottom: '0.5rem', fontWeight: 'bold' }}>✅ TOP 3 (Points forts)</div>
+              {classementsQuestionsM1.top3_5S.map((p, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.2rem 0', borderBottom: '1px solid #1e293b', fontSize: '0.8rem' }}>
+                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '120px' }} title={p.name}>{p.name}</span>
+                  <span style={{ fontWeight: 'bold', color: getColor5S(p.taux) }}>{p.taux}%</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ background: '#0f172a', padding: '1rem', borderRadius: '8px' }}>
+              <div style={{ fontSize: '0.75rem', color: '#ef4444', marginBottom: '0.5rem', fontWeight: 'bold' }}>⚠️ BOTTOM 3 (À améliorer)</div>
+              {classementsQuestionsM1.bottom3_5S.map((p, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.2rem 0', borderBottom: '1px solid #1e293b', fontSize: '0.8rem' }}>
+                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '120px' }} title={p.name}>{p.name}</span>
+                  <span style={{ fontWeight: 'bold', color: getColor5S(p.taux) }}>{p.taux}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* LIGNE 3 : MOYENNE UAP */}
       <div style={{ background: '#1e293b', padding: '1.5rem', borderRadius: '10px' }}>
         <h2 style={{ fontSize: '1.5rem', marginTop: 0, color: '#e2e8f0', marginBottom: '1.5rem' }}>🏭 MOYENNE DES RÉSULTATS PAR UAP (M-1)</h2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem' }}>
           {moyennesUap.map((uap, i) => (
             <div key={i} style={{ background: '#0f172a', padding: '1.5rem', borderRadius: '8px', border: '1px solid #334155' }}>
-              <h3 style={{ textAlign: 'center', color: '#e2e8f0', margin: '0 0 1.5rem 0', fontSize: '1.3rem' }}>{uap.name}</h3>
+              <h3 style={{ textAlign: 'center', color: '#e2e8f0', margin: '0 0 1rem 0', fontSize: '1.2rem' }}>{uap.name}</h3>
               <div style={{ marginBottom: '1rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', marginBottom: '0.5rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '0.3rem' }}>
                   <span style={{ color: '#94a3b8' }}>Gemba</span>
                   <span style={{ fontWeight: 'bold', color: getColorGemba(uap.gemba) }}>{uap.gemba}%</span>
                 </div>
-                <div style={{ width: '100%', background: '#334155', height: '12px', borderRadius: '6px', overflow: 'hidden' }}>
+                <div style={{ width: '100%', background: '#334155', height: '10px', borderRadius: '5px', overflow: 'hidden' }}>
                   <div style={{ width: `${uap.gemba}%`, background: getColorGemba(uap.gemba), height: '100%' }}></div>
                 </div>
               </div>
               <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', marginBottom: '0.5rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '0.3rem' }}>
                   <span style={{ color: '#94a3b8' }}>5S</span>
                   <span style={{ fontWeight: 'bold', color: getColor5S(uap.s5) }}>{uap.s5}%</span>
                 </div>
-                <div style={{ width: '100%', background: '#334155', height: '12px', borderRadius: '6px', overflow: 'hidden' }}>
+                <div style={{ width: '100%', background: '#334155', height: '10px', borderRadius: '5px', overflow: 'hidden' }}>
                   <div style={{ width: `${uap.s5}%`, background: getColor5S(uap.s5), height: '100%' }}></div>
                 </div>
               </div>

@@ -135,8 +135,8 @@ export default function App() {
         {/* GEMBA */}
         {currentView === 'import_gemba' && <ImportGemba />}
         {currentView === 'planifie_gemba' && <GembaPlanifieRealise />}
-        {['uap_gemba', 'lignes_gemba', 'top3_gemba', 'piliers_gemba'].includes(currentView) && <GembaDashboard view={currentView} />}
-        {currentView === 'analyse_gemba' && <GembaAnalyse />}
+        {['lignes_gemba', 'top3_gemba', 'piliers_gemba'].includes(currentView) && <GembaDashboard view={currentView} />}
+        {(currentView === 'uap_gemba' || currentView === 'analyse_gemba') && <GembaAnalyse />}
         {currentView === 'plan_action_gemba' && <PlanActionGemba />}
         {currentView === 'pilotes_gemba' && <PilotesGemba />}
         {currentView === 'rapport_gemba' && <RapportGemba />}

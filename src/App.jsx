@@ -20,6 +20,7 @@ import Parametres from './pages/Parametres' // NOUVEAU
 
 import ImportGemba from './pages/ImportGemba'
 import GembaDashboard from './pages/GembaDashboard'
+import GembaResultatsLigne from './pages/GembaResultatsLigne'
 import GembaPlanifieRealise from './pages/GembaPlanifieRealise'
 import GembaAnalyse from './pages/GembaAnalyse'
 import RapportGemba from './pages/RapportGemba'
@@ -135,7 +136,8 @@ export default function App() {
         {/* GEMBA */}
         {currentView === 'import_gemba' && <ImportGemba />}
         {currentView === 'planifie_gemba' && <GembaPlanifieRealise />}
-        {['lignes_gemba', 'top3_gemba', 'piliers_gemba'].includes(currentView) && <GembaDashboard view={currentView} />}
+        {currentView === 'lignes_gemba' && <GembaResultatsLigne />}
+        {['top3_gemba', 'piliers_gemba'].includes(currentView) && <GembaDashboard view={currentView} />}
         {(currentView === 'uap_gemba' || currentView === 'analyse_gemba') && <GembaAnalyse />}
         {currentView === 'plan_action_gemba' && <PlanActionGemba />}
         {currentView === 'pilotes_gemba' && <PilotesGemba />}

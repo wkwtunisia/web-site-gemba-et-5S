@@ -1,3 +1,5 @@
+import GembaPiliers from './pages/GembaPiliers'
+import GembaUap from './pages/GembaUap'
 import ResultatsS1 from './pages/ResultatsS1'
 import TvDashboard from './pages/TvDashboard'
 import { useState, useEffect } from 'react'
@@ -137,8 +139,9 @@ export default function App() {
         {currentView === 'import_gemba' && <ImportGemba />}
         {currentView === 'planifie_gemba' && <GembaPlanifieRealise />}
         {currentView === 'lignes_gemba' && <GembaResultatsLigne />}
-        {['top3_gemba', 'piliers_gemba'].includes(currentView) && <GembaDashboard view={currentView} />}
-        {(currentView === 'uap_gemba' || currentView === 'analyse_gemba') && <GembaAnalyse />}
+        {['top3_gemba'].includes(currentView) && <GembaDashboard view={currentView} />}
+        {currentView === 'piliers_gemba' && <GembaPiliers />}
+        {currentView === 'analyse_gemba' && <GembaAnalyse />}
         {currentView === 'plan_action_gemba' && <PlanActionGemba />}
         {currentView === 'pilotes_gemba' && <PilotesGemba />}
         {currentView === 'rapport_gemba' && <RapportGemba />}

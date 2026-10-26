@@ -1,70 +1,109 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../supabaseClient'
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, LabelList, Legend } from 'recharts'
-import { formatMonthLabel } from '../utils/dateHelpers'
 
 const OBJECTIF_SEMAINE = 5
+
+const parseDate = (dateStr) => {
+  if (!dateStr) return null
+  let d = new Date(dateStr)
+  if (!isNaN(d.getTime())) return d
+  const str = String(dateStr).trim()
+  const match = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/)
+  if (match) {
+    d = new Date(`${match[3]}-${match[2]}-${match[1]}`)
+    if (!isNaN(d.getTime())) return d
+  }
+  const matchISO = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/)
+  if (matchISO) {
+    d = new Date(`${matchISO[1]}-${matchISO[2]}-${matchISO[3]}`)
+    if (!isNaN(d.getTime())) return d
+  }
+  return null
+}
+
+function getWeekNum(d) {
+  if (!d) return null
+  const target = new Date(d.valueOf());
+  const dayNr = (d.getDay() + 6) % 7;
+  target.setDate(target.getDate() - dayNr + 3); 
+  const firstThursday = target.valueOf();
+  target.setMonth(0, 1);
+  if (target.getDay() !== 4) {
+    target.setMonth(0, 1 + ((4 - target.getDay()) + 7) % 7);
+  }
+  return 1 + Math.ceil((firstThursday - target) / 604800000);
+}
 
 export default function GembaPlanifieRealise() {
   const [data, setData] = useState([])
   const [loading, setLoading] = useState(true)
-  const [monthFilter, setMonthFilter] = useState('')
+  const [startDate, setStartDate] = useState('')
+  const [endDate, setEndDate] = useState('')
 
   useEffect(() => {
-    supabase.from('gemba_audits').select('*').order('date', { ascending: true }).then(({ data, error }) => {
-      if (!error) setData(data || [])
+    let allData = []
+    const fetchData = async () => {
+      let from = 0
+      const step = 1000
+      let hasMore = true
+      while(hasMore) {
+        const { data: chunk, error } = await supabase.from('gemba_audits').select('*').order('date', { ascending: true }).range(from, from + step - 1)
+        if (error) break
+        if (chunk.length === 0) hasMore = false
+        else { allData = [...allData, ...chunk]; from += step }
+      }
+      setData(allData)
       setLoading(false)
-    })
+    }
+    fetchData()
   }, [])
 
-  const getMonthKey = (dateStr) => dateStr ? dateStr.slice(0, 7) : null
-  const months = useMemo(() => [...new Set(data.map(d => getMonthKey(d.date)).filter(Boolean))].sort().reverse(), [data])
+  const isWithinDateRange = (dateStr) => {
+    if (!startDate && !endDate) return true
+    const d = parseDate(dateStr)
+    if (!d) return false
+    const s = startDate ? new Date(startDate) : new Date(0)
+    const e = endDate ? new Date(endDate) : new Date(8640000000000000)
+    s.setHours(0, 0, 0, 0)
+    e.setHours(23, 59, 59, 999)
+    d.setHours(12, 0, 0, 0)
+    return d >= s && d <= e
+  }
 
-  // 1. Filtrer les données par mois
-  const filtered = useMemo(() => data.filter(d => !monthFilter || getMonthKey(d.date) === monthFilter), [data, monthFilter])
+  const filtered = useMemo(() => data.filter(d => isWithinDateRange(d.date)), [data, startDate, endDate])
 
-  // 2. Regrouper les audits par date + ligne (pour ne pas compter les questions multiples)
   const auditsGrouped = useMemo(() => {
     const groups = {}
     filtered.forEach(row => {
       const auditKey = `${row.date}|${row.ligne}`
       if (!groups[auditKey]) {
-        groups[auditKey] = { date: row.date, semaine: row.semaine, ligne: row.ligne }
+        groups[auditKey] = { date: row.date, ligne: row.ligne }
       }
     })
     return Object.values(groups)
   }, [filtered])
 
-  // 3. Calculer les données par semaine
   const weeklyData = useMemo(() => {
     const weeksMap = {}
     
-    // Initialiser toutes les semaines du mois
-    if (monthFilter) {
-      const [year, month] = monthFilter.split('-')
-      const date = new Date(year, parseInt(month) - 1, 1)
-      while (date.getMonth() === parseInt(month) - 1) {
-        const weekNum = getWeekNum(date)
-        if (weekNum) weeksMap[weekNum] = 0
-        date.setDate(date.getDate() + 1)
-      }
-    }
-
-    // Remplir avec les vrais chiffres
     auditsGrouped.forEach(audit => {
-      if (!audit.semaine) return
-      if (!weeksMap[audit.semaine]) weeksMap[audit.semaine] = 0
-      weeksMap[audit.semaine]++
+      const d = parseDate(audit.date)
+      const weekNum = getWeekNum(d)
+      if (!weekNum) return
+      const label = `S${String(weekNum).padStart(2, '0')}`
+      if (!weeksMap[label]) weeksMap[label] = 0
+      weeksMap[label]++
     })
 
     return Object.entries(weeksMap)
-      .map(([weekNum, count]) => ({
-        label: `S${String(weekNum).padStart(2, '0')}`,
+      .map(([label, count]) => ({
+        label,
         'Objectif': OBJECTIF_SEMAINE,
         'Réalisé': count
       }))
       .sort((a, b) => a.label.localeCompare(b.label))
-  }, [auditsGrouped, monthFilter])
+  }, [auditsGrouped])
 
   const totalRealise = auditsGrouped.length
   const totalPlanifie = weeklyData.length * OBJECTIF_SEMAINE
@@ -73,12 +112,19 @@ export default function GembaPlanifieRealise() {
 
   return (
     <div>
-      <div className="flex-between" style={{ marginBottom: '1.5rem' }}>
+      <div className="flex-between" style={{ marginBottom: '1.5rem', alignItems: 'center' }}>
         <h1 style={{ fontSize: '1.5rem', margin: 0 }}>Planifié vs Réalisé (Gemba)</h1>
-        <select className="filter-control" value={monthFilter} onChange={e => setMonthFilter(e.target.value)}>
-          <option value="">Tous les mois</option>
-          {months.map(m => <option key={m} value={m}>{formatMonthLabel(m)}</option>)}
-        </select>
+        
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', background: 'var(--surface)', padding: '0.5rem 1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>Du</label>
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={{ background: 'transparent', color: 'var(--text-main)', border: 'none', outline: 'none', fontSize: '0.9rem' }} />
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.2rem' }}>Au</label>
+            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} style={{ background: 'transparent', color: 'var(--text-main)', border: 'none', outline: 'none', fontSize: '0.9rem' }} />
+          </div>
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
@@ -124,16 +170,4 @@ export default function GembaPlanifieRealise() {
       </div>
     </div>
   )
-}
-
-function getWeekNum(d) {
-  const target = new Date(d.valueOf());
-  const dayNr = (d.getDay() + 6) % 7;
-  target.setDate(target.getDate() - dayNr + 3); 
-  const firstThursday = target.valueOf();
-  target.setMonth(0, 1);
-  if (target.getDay() !== 4) {
-    target.setMonth(0, 1 + ((4 - target.getDay()) + 7) % 7);
-  }
-  return 1 + Math.ceil((firstThursday - target) / 604800000);
 }

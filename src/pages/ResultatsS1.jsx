@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../supabaseClient'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell, LabelList, Legend } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell, LabelList } from 'recharts'
 
 const normalizeString = (str) => {
   if (!str) return ''
@@ -22,20 +22,22 @@ const getUap5S = (zone) => {
 const getColorGemba = (score) => score >= 90 ? '#10b981' : score >= 85 ? '#f59e0b' : '#ef4444'
 const getColor5S = (score) => score >= 86 ? '#10b981' : score >= 80 ? '#f59e0b' : '#ef4444'
 
-// 🌟 FONCTION POUR CALCULER LE NUMÉRO DE SEMAINE (ex: "2026-W42")
-const getWeekNumber = (d) => {
-  const date = new Date(d)
-  if (isNaN(date.getTime())) return null
-  const target = new Date(date.valueOf())
-  const dayNr = (date.getDay() + 6) % 7
-  target.setDate(target.getDate() - dayNr + 3)
-  const firstThursday = target.valueOf()
-  target.setMonth(0, 1)
-  if (target.getDay() !== 4) {
-    target.setMonth(0, 1 + ((4 - target.getDay()) + 7) % 7)
+const parseDate = (dateStr) => {
+  if (!dateStr) return null
+  let d = new Date(dateStr)
+  if (!isNaN(d.getTime())) return d
+  const str = String(dateStr).trim()
+  const match = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/)
+  if (match) {
+    d = new Date(`${match[3]}-${match[2]}-${match[1]}`)
+    if (!isNaN(d.getTime())) return d
   }
-  const weekNum = 1 + Math.ceil((firstThursday - target) / 604800000)
-  return `W${weekNum}`
+  const matchISO = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/)
+  if (matchISO) {
+    d = new Date(`${matchISO[1]}-${matchISO[2]}-${matchISO[3]}`)
+    if (!isNaN(d.getTime())) return d
+  }
+  return null
 }
 
 const fetchAll = async (tableName) => {
@@ -44,11 +46,7 @@ const fetchAll = async (tableName) => {
   const step = 1000
   let hasMore = true
   while (hasMore) {
-    const { data, error } = await supabase
-      .from(tableName)
-      .select('*')
-      .order('date', { ascending: false }) 
-      .range(from, from + step - 1)
+    const { data, error } = await supabase.from(tableName).select('*').order('date', { ascending: false }).range(from, from + step - 1)
     if (error) { console.error(`Erreur sur ${tableName}:`, error); break }
     if (data.length === 0) { hasMore = false } else { allData = [...allData, ...data]; from += step }
   }
@@ -59,7 +57,7 @@ const CustomTooltip = ({ active, payload, label }) => {
   if (active && payload && payload.length) {
     return (
       <div style={{ background: '#1e293b', border: '1px solid #334155', padding: '10px', borderRadius: '5px', color: 'white', boxShadow: '0 4px 6px rgba(0,0,0,0.3)' }}>
-        <p style={{ margin: 0, fontWeight: 'bold', color: '#38bdf8' }}>Semaine : {label}</p>
+        <p style={{ margin: 0, fontWeight: 'bold', color: '#38bdf8' }}>{label}</p>
         {payload.map((entry, index) => (
           <p key={index} style={{ margin: '5px 0', color: entry.color, fontWeight: 'bold' }}>
             {entry.name} : {entry.value}
@@ -74,59 +72,30 @@ const CustomTooltip = ({ active, payload, label }) => {
 export default function ResultatsS1() {
   const [audits5S, setAudits5S] = useState([])
   const [auditsGemba, setAuditsGemba] = useState([])
-  const [planning, setPlanning] = useState([])
   const [loading, setLoading] = useState(true)
 
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
 
   useEffect(() => {
-    Promise.all([
-      fetchAll('audits'), 
-      fetchAll('gemba_audits'),
-      fetchAll('planning').catch(() => []) 
-    ]).then(([res5S, resGemba, resPlanning]) => {
+    Promise.all([fetchAll('audits'), fetchAll('gemba_audits')]).then(([res5S, resGemba]) => {
       setAudits5S(res5S || [])
       setAuditsGemba(resGemba || [])
-      setPlanning(resPlanning || [])
       setLoading(false)
     })
   }, [])
 
-  useEffect(() => {
-    const now = new Date()
-    const dayOfWeek = now.getDay() === 0 ? 7 : now.getDay()
-    const startOfCurrentWeek = new Date(now)
-    startOfCurrentWeek.setDate(now.getDate() - dayOfWeek + 1)
-    startOfCurrentWeek.setHours(0, 0, 0, 0)
-    
-    const endOfPrevWeek = new Date(startOfCurrentWeek)
-    endOfPrevWeek.setDate(endOfPrevWeek.getDate() - 1)
-    
-    const startOfPrevWeek = new Date(endOfPrevWeek)
-    startOfPrevWeek.setDate(startOfPrevWeek.getDate() - 6)
-
-    const formatDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-    
-    setStartDate(formatDate(startOfPrevWeek))
-    setEndDate(formatDate(endOfPrevWeek))
-  }, [])
-
   const isWithinDateRange = (dateStr) => {
-    if (!dateStr) return false
     if (!startDate && !endDate) return true
-    const str = String(dateStr)
-    let dateOnly = str.split('T')[0]
-    if (dateOnly.includes('/')) {
-      const parts = dateOnly.split('/')
-      if (parts.length === 3) dateOnly = `${parts[2]}-${parts[1]}-${parts[0]}`
-    }
-    if (startDate && dateOnly < startDate) return false
-    if (endDate && dateOnly > endDate) return false
-    return true
+    const d = parseDate(dateStr)
+    if (!d) return false
+    const s = startDate ? new Date(startDate) : new Date(0)
+    const e = endDate ? new Date(endDate) : new Date(8640000000000000)
+    s.setHours(0, 0, 0, 0)
+    e.setHours(23, 59, 59, 999)
+    d.setHours(12, 0, 0, 0)
+    return d >= s && d <= e
   }
-
-  const truncate = (str, max = 30) => str.length > max ? str.substring(0, max) + '...' : str
 
   const kpiStats = useMemo(() => {
     const gembaSessions = new Set()
@@ -138,11 +107,9 @@ export default function ResultatsS1() {
       }
     })
     const realise5S = audits5S.filter(a => isWithinDateRange(a.date)).length
-    const planifie5S = planning.filter(p => isWithinDateRange(p.date)).length
-    return { gembaLignes: gembaLignes.size, gembaAudits: gembaSessions.size, planifie5S, realise5S }
-  }, [audits5S, auditsGemba, planning, startDate, endDate])
+    return { gembaLignes: gembaLignes.size, gembaAudits: gembaSessions.size, realise5S }
+  }, [audits5S, auditsGemba, startDate, endDate])
 
-  // 🌟 DONNÉES GRAPHIQUE GEMBA (Par ligne)
   const dataChartGemba = useMemo(() => {
     const gembaGroups = {}
     auditsGemba.forEach(a => {
@@ -152,12 +119,9 @@ export default function ResultatsS1() {
       gembaGroups[ligne].total++
       if (String(a.reponse).toUpperCase() === 'OK') gembaGroups[ligne].ok++
     })
-    return Object.entries(gembaGroups)
-      .map(([ligne, data]) => ({ name: ligne, score: Math.round((data.ok / data.total) * 100) }))
-      .sort((a, b) => b.score - a.score)
+    return Object.entries(gembaGroups).map(([ligne, data]) => ({ name: ligne, score: Math.round((data.ok / data.total) * 100) })).sort((a, b) => b.score - a.score)
   }, [auditsGemba, startDate, endDate])
 
-  // 🌟 DONNÉES GRAPHIQUE 5S (Par zone)
   const dataChart5S = useMemo(() => {
     const stats5S = {}
     audits5S.forEach(a => {
@@ -166,86 +130,8 @@ export default function ResultatsS1() {
       stats5S[a.zone].sum += Number(a.score_pct) || 0
       stats5S[a.zone].count++
     })
-    return Object.entries(stats5S)
-      .map(([zone, data]) => ({ name: zone, score: Math.round(data.sum / data.count) }))
-      .sort((a, b) => b.score - a.score)
+    return Object.entries(stats5S).map(([zone, data]) => ({ name: zone, score: Math.round(data.sum / data.count) })).sort((a, b) => b.score - a.score)
   }, [audits5S, startDate, endDate])
-
-  // 🌟 NOUVELLES DONNÉES : PLANIFIÉ VS RÉALISÉ (Par semaine) - GEMBA
-  const dataPlanGemba = useMemo(() => {
-    const weeks = {}
-    
-    // Comptage des réalisés
-    const gembaSessions = new Set()
-    auditsGemba.forEach(a => {
-      if (!isWithinDateRange(a.date)) return
-      const w = getWeekNumber(a.date)
-      if (!w) return
-      if (!weeks[w]) weeks[w] = { week: w, planifie: 5, realise: 0, _sessions: new Set() }
-      
-      const sessionKey = `${a.date}|${a.ligne}`
-      if (!weeks[w]._sessions.has(sessionKey)) {
-        weeks[w]._sessions.add(sessionKey)
-        weeks[w].realise++
-      }
-    })
-
-    // On ajoute les semaines avec 0 réalisés (pour avoir un continuum)
-    const allWeeks = new Set([...Object.keys(weeks)])
-    // Si vous avez un tableau de planning dans Supabase, on l'ajoute ici :
-    planning.forEach(p => {
-      if (!isWithinDateRange(p.date)) return
-      const w = getWeekNumber(p.date)
-      if (w) allWeeks.add(w)
-    })
-
-    return Array.from(allWeeks).map(w => {
-      const data = weeks[w] || { planifie: 5, realise: 0 }
-      return {
-        week: w,
-        Planifié: data.planifie,
-        Réalisé: data.realise
-      }
-    }).sort((a, b) => {
-      const numA = parseInt(a.week.replace('W', ''))
-      const numB = parseInt(b.week.replace('W', ''))
-      return numA - numB
-    })
-  }, [auditsGemba, planning, startDate, endDate])
-
-  // 🌟 NOUVELLES DONNÉES : PLANIFIÉ VS RÉALISÉ (Par semaine) - 5S
-  const dataPlan5S = useMemo(() => {
-    const weeks = {}
-    
-    // Comptage des réalisés
-    audits5S.forEach(a => {
-      if (!isWithinDateRange(a.date)) return
-      const w = getWeekNumber(a.date)
-      if (!w) return
-      if (!weeks[w]) weeks[w] = { week: w, planifie: 5, realise: 0 }
-      weeks[w].realise++
-    })
-
-    const allWeeks = new Set([...Object.keys(weeks)])
-    planning.forEach(p => {
-      if (!isWithinDateRange(p.date)) return
-      const w = getWeekNumber(p.date)
-      if (w) allWeeks.add(w)
-    })
-
-    return Array.from(allWeeks).map(w => {
-      const data = weeks[w] || { planifie: 5, realise: 0 }
-      return {
-        week: w,
-        Planifié: data.planifie,
-        Réalisé: data.realise
-      }
-    }).sort((a, b) => {
-      const numA = parseInt(a.week.replace('W', ''))
-      const numB = parseInt(b.week.replace('W', ''))
-      return numA - numB
-    })
-  }, [audits5S, planning, startDate, endDate])
 
   const scoresGlobaux = useMemo(() => {
     const scores5S = []
@@ -290,10 +176,10 @@ export default function ResultatsS1() {
     const listGemba = Object.entries(gembaGroups).map(([ligne, data]) => ({ name: ligne, taux: Math.round((data.ok / data.total) * 100) })).sort((a, b) => b.taux - a.taux)
 
     return {
-      top3_5S: list5S.slice(0, 3).map(l => ({...l, name: truncate(l.name)})),
-      bottom3_5S: list5S.slice(-3).reverse().map(l => ({...l, name: truncate(l.name)})),
-      top3_Gemba: listGemba.slice(0, 3).map(l => ({...l, name: truncate(l.name)})),
-      bottom3_Gemba: listGemba.slice(-3).reverse().map(l => ({...l, name: truncate(l.name)}))
+      top3_5S: list5S.slice(0, 3),
+      bottom3_5S: list5S.slice(-3).reverse(),
+      top3_Gemba: listGemba.slice(0, 3),
+      bottom3_Gemba: listGemba.slice(-3).reverse()
     }
   }, [audits5S, auditsGemba, startDate, endDate])
 
@@ -326,10 +212,10 @@ export default function ResultatsS1() {
       .filter(q => q.total >= 2).sort((a, b) => b.taux - a.taux)
 
     return {
-      top3_5S: list5S.slice(0, 3).map(q => ({ ...q, name: truncate(q.name) })),
-      bottom3_5S: list5S.slice(-3).reverse().map(q => ({ ...q, name: truncate(q.name) })),
-      top3_Gemba: listGemba.slice(0, 3).map(q => ({ ...q, name: truncate(q.name) })),
-      bottom3_Gemba: listGemba.slice(-3).reverse().map(q => ({ ...q, name: truncate(q.name) }))
+      top3_5S: list5S.slice(0, 3),
+      bottom3_5S: list5S.slice(-3).reverse(),
+      top3_Gemba: listGemba.slice(0, 3),
+      bottom3_Gemba: listGemba.slice(-3).reverse()
     }
   }, [audits5S, auditsGemba, startDate, endDate])
 
@@ -395,7 +281,6 @@ export default function ResultatsS1() {
         </div>
       </div>
 
-      {/* 4 BLOCS KPI */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '2rem' }}>
         <div className="card" style={{ padding: '1.5rem', textAlign: 'center', borderLeft: '8px solid #38bdf8' }}>
           <h2 style={{ fontSize: '1rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>Score Gemba</h2>
@@ -418,17 +303,14 @@ export default function ResultatsS1() {
         </div>
 
         <div className="card" style={{ padding: '1.5rem', textAlign: 'center', borderLeft: '8px solid #10b981' }}>
-          <h2 style={{ fontSize: '1rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>5S (Planifié / Réalisé)</h2>
+          <h2 style={{ fontSize: '1rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>5S (Réalisé)</h2>
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'baseline', gap: '0.5rem' }}>
-            <div style={{ fontSize: '2.5rem', fontWeight: 'bold', color: '#10b981' }}>{kpiStats.planifie5S}</div>
-            <div style={{ fontSize: '1.5rem', color: 'var(--text-muted)' }}>/</div>
-            <div style={{ fontSize: '2rem', fontWeight: 'bold', color: 'var(--text-main)' }}>{kpiStats.realise5S}</div>
+            <div style={{ fontSize: '3rem', fontWeight: 'bold', color: '#10b981' }}>{kpiStats.realise5S}</div>
           </div>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>planifiés / réalisés</div>
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>audits réalisés</div>
         </div>
       </div>
 
-      {/* GRAPHIQUES COMPARATIFS PAR LIGNE */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginBottom: '2rem' }}>
         <div className="card" style={{ padding: '1.5rem', background: '#111827', borderRadius: '8px' }}>
           <div style={{ marginBottom: '1.5rem' }}>
@@ -473,52 +355,6 @@ export default function ResultatsS1() {
         </div>
       </div>
 
-      {/* 🌟 NOUVEAUX GRAPHIQUES : PLANIFIÉ VS RÉALISÉ PAR SEMAINE */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '2rem', marginBottom: '2rem' }}>
-        
-        <div className="card" style={{ padding: '1.5rem', background: '#111827', borderRadius: '8px' }}>
-          <div style={{ marginBottom: '1.5rem' }}>
-            <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#f8fafc', margin: 0 }}>Gemba — Planifié vs Réalisé</h2>
-            <p style={{ fontSize: '0.85rem', color: '#94a3b8', margin: '0.2rem 0 0 0' }}>Évolution par semaine</p>
-          </div>
-          <div style={{ height: '300px', width: '100%' }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={dataPlanGemba} margin={{ top: 20, right: 30, left: 0, bottom: 0 }} barGap={0} barCategoryGap="20%">
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
-                <XAxis dataKey="week" stroke="#94a3b8" tick={{ fontSize: 12, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                <YAxis stroke="#94a3b8" tick={{ fontSize: 12, fill: '#94a3b8' }} axisLine={false} tickLine={false} allowDecimals={false} />
-                <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.05)' }} />
-                <Legend wrapperStyle={{ paddingTop: '10px' }} />
-                <Bar dataKey="Planifié" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={30} />
-                <Bar dataKey="Réalisé" fill="#f97316" radius={[4, 4, 0, 0]} maxBarSize={30} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div className="card" style={{ padding: '1.5rem', background: '#111827', borderRadius: '8px' }}>
-          <div style={{ marginBottom: '1.5rem' }}>
-            <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#f8fafc', margin: 0 }}>5S — Planifié vs Réalisé</h2>
-            <p style={{ fontSize: '0.85rem', color: '#94a3b8', margin: '0.2rem 0 0 0' }}>Évolution par semaine</p>
-          </div>
-          <div style={{ height: '300px', width: '100%' }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={dataPlan5S} margin={{ top: 20, right: 30, left: 0, bottom: 0 }} barGap={0} barCategoryGap="20%">
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
-                <XAxis dataKey="week" stroke="#94a3b8" tick={{ fontSize: 12, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                <YAxis stroke="#94a3b8" tick={{ fontSize: 12, fill: '#94a3b8' }} axisLine={false} tickLine={false} allowDecimals={false} />
-                <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.05)' }} />
-                <Legend wrapperStyle={{ paddingTop: '10px' }} />
-                <Bar dataKey="Planifié" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={30} />
-                <Bar dataKey="Réalisé" fill="#f97316" radius={[4, 4, 0, 0]} maxBarSize={30} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-      </div>
-
-      {/* CLASSEMENTS LIGNES */}
       <div className="card" style={{ padding: '1.5rem', marginBottom: '2rem' }}>
         <h2 className="card-title" style={{ marginBottom: '1.5rem' }}>📊 Classement des Lignes</h2>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
@@ -572,7 +408,6 @@ export default function ResultatsS1() {
         </div>
       </div>
 
-      {/* CLASSEMENTS QUESTIONS */}
       <div className="card" style={{ padding: '1.5rem', marginBottom: '2rem' }}>
         <h2 className="card-title" style={{ marginBottom: '1.5rem' }}>💡 Points Forts & À Améliorer (Questions)</h2>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem' }}>
@@ -626,7 +461,6 @@ export default function ResultatsS1() {
         </div>
       </div>
 
-      {/* MOYENNES UAP */}
       <div className="card" style={{ padding: '1.5rem' }}>
         <h2 className="card-title" style={{ marginBottom: '1.5rem' }}>🏭 Moyenne par UAP</h2>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem' }}>

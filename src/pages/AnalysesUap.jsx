@@ -1,14 +1,22 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, LabelList } from 'recharts'
 
-const UAP_CONFIG = {
-  uap1: { title: 'UAP 1', zones: ['F02', 'F01', 'F83', 'F85', 'F86', 'F99', 'L76', 'L77'], color: '#3b82f6' },
-  uap2: { title: 'UAP 2', zones: [], color: '#8b5cf6' },
-  logistique: { title: 'Logistique', zones: ['MAGASIN GENERAL', 'MAGASIN P1', 'MAGASIN P2'], color: '#f59e0b' },
-  usine: { title: 'Usine', color: '#10b981' }
+// 🌟 NOUVELLE LOGIQUE STRICTE (Basée sur votre liste exacte)
+const getUap5S = (zone) => {
+  if (!zone) return 'UAP 2' // Si pas de zone, on met dans UAP 2 par défaut
+  const clean = zone.trim().toUpperCase().replace(/\s+/g, '') // On enlève les espaces
+
+  // 1. Logistique (tout ce qui contient MAGASIN)
+  if (clean.includes('MAGASIN') || clean.includes('STOCKAGE')) return 'Logistique'
+
+  // 2. UAP 1 (Votre liste exacte)
+  const uap1List = ['F01', 'F02', 'F83', 'F99', 'F86', 'F85', 'L77', 'L76']
+  if (uap1List.includes(clean)) return 'UAP 1'
+
+  // 3. UAP 2 (Tout le reste)
+  return 'UAP 2'
 }
 
-// 🌟 LOGIQUE DE COULEURS (5S)
 const getColor = (score) => score >= 86 ? '#10b981' : score >= 80 ? '#f59e0b' : '#ef4444'
 const axisStyle = { fontSize: 12, fill: '#94a3b8' }
 
@@ -72,11 +80,6 @@ export default function AnalysesUap({ audits }) {
     })
   }, [audits, startDate, endDate, weekFilter])
 
-  const isUap1 = (z) => UAP_CONFIG.uap1.zones.includes(z?.trim())
-  const isLogistique = (z) => UAP_CONFIG.logistique.zones.includes(z?.trim())
-  const isUap2 = (z) => !isUap1(z) && !isLogistique(z)
-
-  // 🌟 1. CALCUL DES KPI (Moyenne des score_pct)
   const kpis = useMemo(() => {
     const uaps = { 'UAP 1': [], 'UAP 2': [], 'Logistique': [], 'Usine': [] }
 
@@ -84,9 +87,8 @@ export default function AnalysesUap({ audits }) {
       const score = Number(a.score_pct) || 0
       uaps['Usine'].push(score)
 
-      if (isUap1(a.zone)) uaps['UAP 1'].push(score)
-      else if (isLogistique(a.zone)) uaps['Logistique'].push(score)
-      else uaps['UAP 2'].push(score)
+      const uap = getUap5S(a.zone)
+      if (uaps[uap]) uaps[uap].push(score)
     })
 
     const calcAvg = (arr) => arr.length === 0 ? 0 : Math.round(arr.reduce((a, b) => a + b, 0) / arr.length)
@@ -99,7 +101,6 @@ export default function AnalysesUap({ audits }) {
     }
   }, [filteredAudits])
 
-  // 🌟 2. CALCUL DES TENDANCES (Moyenne des score_pct)
   const trendData = useMemo(() => {
     let groupBy = 'month'
     if (weekFilter) groupBy = 'day'
@@ -107,46 +108,53 @@ export default function AnalysesUap({ audits }) {
 
     const groups = {}
 
-    filteredAudits.forEach(a => {
+    const sortedAudits = [...filteredAudits].sort((a, b) => {
+      const dateCompare = extractDateString(a.date).localeCompare(extractDateString(b.date))
+      if (dateCompare !== 0) return dateCompare
+      return (a.zone || '').localeCompare(b.zone || '')
+    })
+
+    sortedAudits.forEach(a => {
       const dStr = extractDateString(a.date)
       if (!dStr) return
 
       let key = ''
-      if (groupBy === 'month') key = dStr.substring(0, 7)
-      if (groupBy === 'week') key = getWeekNumber(a.date)
-      if (groupBy === 'day') key = dStr
+      let label = ''
+
+      if (groupBy === 'month') {
+        key = dStr.substring(0, 7)
+        label = new Date(`${key}-01T12:00:00`).toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' })
+      } else if (groupBy === 'week') {
+        key = getWeekNumber(a.date)
+        label = key
+      } else if (groupBy === 'day') {
+        key = `${dStr}_${a.zone}` 
+        const dateLabel = new Date(`${dStr}T12:00:00`).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })
+        label = `${dateLabel} (${a.zone})`
+      }
 
       if (!key) return
-      if (!groups[key]) groups[key] = { key, uap1: [], uap2: [], logistique: [], usine: [] }
+      if (!groups[key]) groups[key] = { key, label, uap1: [], uap2: [], logistique: [], usine: [] }
 
       const score = Number(a.score_pct) || 0
       groups[key].usine.push(score)
-      if (isUap1(a.zone)) groups[key].uap1.push(score)
-      else if (isLogistique(a.zone)) groups[key].logistique.push(score)
-      else groups[key].uap2.push(score)
+      
+      const uapName = getUap5S(a.zone)
+      if (uapName === 'UAP 1') groups[key].uap1.push(score)
+      else if (uapName === 'UAP 2') groups[key].uap2.push(score)
+      else if (uapName === 'Logistique') groups[key].logistique.push(score)
     })
 
     const calcAvgForArr = (arr) => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : null
 
-    return Object.values(groups).map(g => {
-      let label = g.key
-      if (groupBy === 'month') {
-        const date = new Date(`${g.key}-01T12:00:00`)
-        label = date.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' })
-      } else if (groupBy === 'day') {
-        const date = new Date(`${g.key}T12:00:00`)
-        label = date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })
-      }
-
-      return {
-        label,
-        key: g.key,
-        uap1: calcAvgForArr(g.uap1),
-        uap2: calcAvgForArr(g.uap2),
-        logistique: calcAvgForArr(g.logistique),
-        usine: calcAvgForArr(g.usine)
-      }
-    }).sort((a, b) => String(a.key).localeCompare(String(b.key)))
+    return Object.values(groups).map(g => ({
+      label: g.label,
+      key: g.key,
+      uap1: calcAvgForArr(g.uap1),
+      uap2: calcAvgForArr(g.uap2),
+      logistique: calcAvgForArr(g.logistique),
+      usine: calcAvgForArr(g.usine)
+    })).sort((a, b) => a.key.localeCompare(b.key))
   }, [filteredAudits, startDate, endDate, weekFilter])
 
   const KpiCard = ({ title, score }) => (
@@ -181,7 +189,7 @@ export default function AnalysesUap({ audits }) {
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={trendData} margin={{ top: 25, right: 15, left: -20, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
-                <XAxis dataKey="label" tick={axisStyle} axisLine={false} tickLine={false} dy={10} />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} dy={10} angle={-20} textAnchor="end" height={50} />
                 <YAxis domain={[0, 100]} tick={axisStyle} axisLine={false} tickLine={false} />
                 <Tooltip 
                   contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8, color: '#fff' }}
@@ -245,10 +253,10 @@ export default function AnalysesUap({ audits }) {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))', gap: '1.5rem' }}>
-        <GraphCard title="Courbe UAP 1" dataKey="uap1" color={UAP_CONFIG.uap1.color} />
-        <GraphCard title="Courbe UAP 2" dataKey="uap2" color={UAP_CONFIG.uap2.color} />
-        <GraphCard title="Courbe Logistique" dataKey="logistique" color={UAP_CONFIG.logistique.color} />
-        <GraphCard title="Courbe Moyenne Usine" dataKey="usine" color={UAP_CONFIG.usine.color} />
+        <GraphCard title="Courbe UAP 1" dataKey="uap1" color="#3b82f6" />
+        <GraphCard title="Courbe UAP 2" dataKey="uap2" color="#8b5cf6" />
+        <GraphCard title="Courbe Logistique" dataKey="logistique" color="#f59e0b" />
+        <GraphCard title="Courbe Moyenne Usine" dataKey="usine" color="#10b981" />
       </div>
     </div>
   )

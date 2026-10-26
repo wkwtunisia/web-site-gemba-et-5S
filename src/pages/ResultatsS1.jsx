@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../supabaseClient'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell, LabelList } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell, LabelList, Legend } from 'recharts'
 
 const normalizeString = (str) => {
   if (!str) return ''
@@ -22,6 +22,22 @@ const getUap5S = (zone) => {
 const getColorGemba = (score) => score >= 90 ? '#10b981' : score >= 85 ? '#f59e0b' : '#ef4444'
 const getColor5S = (score) => score >= 86 ? '#10b981' : score >= 80 ? '#f59e0b' : '#ef4444'
 
+// 🌟 FONCTION POUR CALCULER LE NUMÉRO DE SEMAINE (ex: "2026-W42")
+const getWeekNumber = (d) => {
+  const date = new Date(d)
+  if (isNaN(date.getTime())) return null
+  const target = new Date(date.valueOf())
+  const dayNr = (date.getDay() + 6) % 7
+  target.setDate(target.getDate() - dayNr + 3)
+  const firstThursday = target.valueOf()
+  target.setMonth(0, 1)
+  if (target.getDay() !== 4) {
+    target.setMonth(0, 1 + ((4 - target.getDay()) + 7) % 7)
+  }
+  const weekNum = 1 + Math.ceil((firstThursday - target) / 604800000)
+  return `W${weekNum}`
+}
+
 const fetchAll = async (tableName) => {
   let allData = []
   let from = 0
@@ -39,13 +55,16 @@ const fetchAll = async (tableName) => {
   return allData
 }
 
-const CustomTooltip = ({ active, payload }) => {
+const CustomTooltip = ({ active, payload, label }) => {
   if (active && payload && payload.length) {
-    const data = payload[0].payload
     return (
       <div style={{ background: '#1e293b', border: '1px solid #334155', padding: '10px', borderRadius: '5px', color: 'white', boxShadow: '0 4px 6px rgba(0,0,0,0.3)' }}>
-        <p style={{ margin: 0, fontWeight: 'bold', color: '#38bdf8' }}>{data.name}</p>
-        <p style={{ margin: '5px 0', color: '#e2e8f0' }}>Score : <span style={{ fontWeight: 'bold', color: 'white' }}>{data.score}%</span></p>
+        <p style={{ margin: 0, fontWeight: 'bold', color: '#38bdf8' }}>Semaine : {label}</p>
+        {payload.map((entry, index) => (
+          <p key={index} style={{ margin: '5px 0', color: entry.color, fontWeight: 'bold' }}>
+            {entry.name} : {entry.value}
+          </p>
+        ))}
       </div>
     )
   }
@@ -74,7 +93,6 @@ export default function ResultatsS1() {
     })
   }, [])
 
-  // Initialisation sur la semaine dernière (S-1)
   useEffect(() => {
     const now = new Date()
     const dayOfWeek = now.getDay() === 0 ? 7 : now.getDay()
@@ -124,7 +142,7 @@ export default function ResultatsS1() {
     return { gembaLignes: gembaLignes.size, gembaAudits: gembaSessions.size, planifie5S, realise5S }
   }, [audits5S, auditsGemba, planning, startDate, endDate])
 
-  // 🌟 DONNÉES POUR LE GRAPHIQUE GEMBA (Par ligne)
+  // 🌟 DONNÉES GRAPHIQUE GEMBA (Par ligne)
   const dataChartGemba = useMemo(() => {
     const gembaGroups = {}
     auditsGemba.forEach(a => {
@@ -135,14 +153,11 @@ export default function ResultatsS1() {
       if (String(a.reponse).toUpperCase() === 'OK') gembaGroups[ligne].ok++
     })
     return Object.entries(gembaGroups)
-      .map(([ligne, data]) => ({
-        name: ligne,
-        score: Math.round((data.ok / data.total) * 100)
-      }))
-      .sort((a, b) => b.score - a.score) // Tri décroissant
+      .map(([ligne, data]) => ({ name: ligne, score: Math.round((data.ok / data.total) * 100) }))
+      .sort((a, b) => b.score - a.score)
   }, [auditsGemba, startDate, endDate])
 
-  // 🌟 DONNÉES POUR LE GRAPHIQUE 5S (Par zone)
+  // 🌟 DONNÉES GRAPHIQUE 5S (Par zone)
   const dataChart5S = useMemo(() => {
     const stats5S = {}
     audits5S.forEach(a => {
@@ -152,12 +167,85 @@ export default function ResultatsS1() {
       stats5S[a.zone].count++
     })
     return Object.entries(stats5S)
-      .map(([zone, data]) => ({
-        name: zone,
-        score: Math.round(data.sum / data.count)
-      }))
-      .sort((a, b) => b.score - a.score) // Tri décroissant
+      .map(([zone, data]) => ({ name: zone, score: Math.round(data.sum / data.count) }))
+      .sort((a, b) => b.score - a.score)
   }, [audits5S, startDate, endDate])
+
+  // 🌟 NOUVELLES DONNÉES : PLANIFIÉ VS RÉALISÉ (Par semaine) - GEMBA
+  const dataPlanGemba = useMemo(() => {
+    const weeks = {}
+    
+    // Comptage des réalisés
+    const gembaSessions = new Set()
+    auditsGemba.forEach(a => {
+      if (!isWithinDateRange(a.date)) return
+      const w = getWeekNumber(a.date)
+      if (!w) return
+      if (!weeks[w]) weeks[w] = { week: w, planifie: 5, realise: 0, _sessions: new Set() }
+      
+      const sessionKey = `${a.date}|${a.ligne}`
+      if (!weeks[w]._sessions.has(sessionKey)) {
+        weeks[w]._sessions.add(sessionKey)
+        weeks[w].realise++
+      }
+    })
+
+    // On ajoute les semaines avec 0 réalisés (pour avoir un continuum)
+    const allWeeks = new Set([...Object.keys(weeks)])
+    // Si vous avez un tableau de planning dans Supabase, on l'ajoute ici :
+    planning.forEach(p => {
+      if (!isWithinDateRange(p.date)) return
+      const w = getWeekNumber(p.date)
+      if (w) allWeeks.add(w)
+    })
+
+    return Array.from(allWeeks).map(w => {
+      const data = weeks[w] || { planifie: 5, realise: 0 }
+      return {
+        week: w,
+        Planifié: data.planifie,
+        Réalisé: data.realise
+      }
+    }).sort((a, b) => {
+      const numA = parseInt(a.week.replace('W', ''))
+      const numB = parseInt(b.week.replace('W', ''))
+      return numA - numB
+    })
+  }, [auditsGemba, planning, startDate, endDate])
+
+  // 🌟 NOUVELLES DONNÉES : PLANIFIÉ VS RÉALISÉ (Par semaine) - 5S
+  const dataPlan5S = useMemo(() => {
+    const weeks = {}
+    
+    // Comptage des réalisés
+    audits5S.forEach(a => {
+      if (!isWithinDateRange(a.date)) return
+      const w = getWeekNumber(a.date)
+      if (!w) return
+      if (!weeks[w]) weeks[w] = { week: w, planifie: 5, realise: 0 }
+      weeks[w].realise++
+    })
+
+    const allWeeks = new Set([...Object.keys(weeks)])
+    planning.forEach(p => {
+      if (!isWithinDateRange(p.date)) return
+      const w = getWeekNumber(p.date)
+      if (w) allWeeks.add(w)
+    })
+
+    return Array.from(allWeeks).map(w => {
+      const data = weeks[w] || { planifie: 5, realise: 0 }
+      return {
+        week: w,
+        Planifié: data.planifie,
+        Réalisé: data.realise
+      }
+    }).sort((a, b) => {
+      const numA = parseInt(a.week.replace('W', ''))
+      const numB = parseInt(b.week.replace('W', ''))
+      return numA - numB
+    })
+  }, [audits5S, planning, startDate, endDate])
 
   const scoresGlobaux = useMemo(() => {
     const scores5S = []
@@ -340,18 +428,12 @@ export default function ResultatsS1() {
         </div>
       </div>
 
-      {/* GRAPHIQUES COMPARATIFS */}
+      {/* GRAPHIQUES COMPARATIFS PAR LIGNE */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginBottom: '2rem' }}>
-        
-        {/* GRAPHIQUE GEMBA */}
         <div className="card" style={{ padding: '1.5rem', background: '#111827', borderRadius: '8px' }}>
           <div style={{ marginBottom: '1.5rem' }}>
-            <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#f8fafc', margin: 0 }}>
-              Gemba — Résultat par ligne
-            </h2>
-            <p style={{ fontSize: '0.85rem', color: '#94a3b8', margin: '0.2rem 0 0 0' }}>
-              {dataChartGemba.length} ligne(s) auditée(s)
-            </p>
+            <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#f8fafc', margin: 0 }}>Gemba — Résultat par ligne</h2>
+            <p style={{ fontSize: '0.85rem', color: '#94a3b8', margin: '0.2rem 0 0 0' }}>{dataChartGemba.length} ligne(s) auditée(s)</p>
           </div>
           <div style={{ height: '300px', width: '100%' }}>
             <ResponsiveContainer width="100%" height="100%">
@@ -361,9 +443,7 @@ export default function ResultatsS1() {
                 <YAxis domain={[0, 100]} unit="%" stroke="#94a3b8" tick={{ fontSize: 12, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
                 <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.05)' }} />
                 <Bar dataKey="score" radius={[4, 4, 0, 0]}>
-                  {dataChartGemba.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={getColorGemba(entry.score)} />
-                  ))}
+                  {dataChartGemba.map((entry, index) => <Cell key={`cell-${index}`} fill={getColorGemba(entry.score)} />)}
                   <LabelList dataKey="score" position="top" formatter={(val) => `${val}%`} fill="#f8fafc" fontSize={12} fontWeight="bold" />
                 </Bar>
               </BarChart>
@@ -371,15 +451,10 @@ export default function ResultatsS1() {
           </div>
         </div>
 
-        {/* GRAPHIQUE 5S */}
         <div className="card" style={{ padding: '1.5rem', background: '#111827', borderRadius: '8px' }}>
           <div style={{ marginBottom: '1.5rem' }}>
-            <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#f8fafc', margin: 0 }}>
-              5S — Résultat par zone
-            </h2>
-            <p style={{ fontSize: '0.85rem', color: '#94a3b8', margin: '0.2rem 0 0 0' }}>
-              {dataChart5S.length} zone(s) auditée(s)
-            </p>
+            <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#f8fafc', margin: 0 }}>5S — Résultat par zone</h2>
+            <p style={{ fontSize: '0.85rem', color: '#94a3b8', margin: '0.2rem 0 0 0' }}>{dataChart5S.length} zone(s) auditée(s)</p>
           </div>
           <div style={{ height: '300px', width: '100%' }}>
             <ResponsiveContainer width="100%" height="100%">
@@ -389,15 +464,58 @@ export default function ResultatsS1() {
                 <YAxis domain={[0, 100]} unit="%" stroke="#94a3b8" tick={{ fontSize: 12, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
                 <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.05)' }} />
                 <Bar dataKey="score" radius={[4, 4, 0, 0]}>
-                  {dataChart5S.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={getColor5S(entry.score)} />
-                  ))}
+                  {dataChart5S.map((entry, index) => <Cell key={`cell-${index}`} fill={getColor5S(entry.score)} />)}
                   <LabelList dataKey="score" position="top" formatter={(val) => `${val}%`} fill="#f8fafc" fontSize={12} fontWeight="bold" />
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
+      </div>
+
+      {/* 🌟 NOUVEAUX GRAPHIQUES : PLANIFIÉ VS RÉALISÉ PAR SEMAINE */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '2rem', marginBottom: '2rem' }}>
+        
+        <div className="card" style={{ padding: '1.5rem', background: '#111827', borderRadius: '8px' }}>
+          <div style={{ marginBottom: '1.5rem' }}>
+            <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#f8fafc', margin: 0 }}>Gemba — Planifié vs Réalisé</h2>
+            <p style={{ fontSize: '0.85rem', color: '#94a3b8', margin: '0.2rem 0 0 0' }}>Évolution par semaine</p>
+          </div>
+          <div style={{ height: '300px', width: '100%' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={dataPlanGemba} margin={{ top: 20, right: 30, left: 0, bottom: 0 }} barGap={0} barCategoryGap="20%">
+                <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                <XAxis dataKey="week" stroke="#94a3b8" tick={{ fontSize: 12, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                <YAxis stroke="#94a3b8" tick={{ fontSize: 12, fill: '#94a3b8' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.05)' }} />
+                <Legend wrapperStyle={{ paddingTop: '10px' }} />
+                <Bar dataKey="Planifié" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={30} />
+                <Bar dataKey="Réalisé" fill="#f97316" radius={[4, 4, 0, 0]} maxBarSize={30} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        <div className="card" style={{ padding: '1.5rem', background: '#111827', borderRadius: '8px' }}>
+          <div style={{ marginBottom: '1.5rem' }}>
+            <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#f8fafc', margin: 0 }}>5S — Planifié vs Réalisé</h2>
+            <p style={{ fontSize: '0.85rem', color: '#94a3b8', margin: '0.2rem 0 0 0' }}>Évolution par semaine</p>
+          </div>
+          <div style={{ height: '300px', width: '100%' }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={dataPlan5S} margin={{ top: 20, right: 30, left: 0, bottom: 0 }} barGap={0} barCategoryGap="20%">
+                <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                <XAxis dataKey="week" stroke="#94a3b8" tick={{ fontSize: 12, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                <YAxis stroke="#94a3b8" tick={{ fontSize: 12, fill: '#94a3b8' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(255,255,255,0.05)' }} />
+                <Legend wrapperStyle={{ paddingTop: '10px' }} />
+                <Bar dataKey="Planifié" fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={30} />
+                <Bar dataKey="Réalisé" fill="#f97316" radius={[4, 4, 0, 0]} maxBarSize={30} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
       </div>
 
       {/* CLASSEMENTS LIGNES */}

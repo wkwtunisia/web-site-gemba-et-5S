@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../supabaseClient'
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine, Legend } from 'recharts'
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine, Legend, LabelList } from 'recharts'
 
 const extractDateString = (dateStr) => {
   if (!dateStr) return null;
@@ -69,6 +69,11 @@ const calculateTrendLine = (data, key) => {
   });
 }
 
+// 🌟 LOGIQUE DE COULEURS
+const getColorGemba = (score) => score >= 90 ? '#10b981' : score >= 85 ? '#f59e0b' : '#ef4444';
+const getColor5S = (score) => score >= 86 ? '#10b981' : score >= 80 ? '#f59e0b' : '#ef4444';
+
+// 🌟 INFOBULLE
 const CustomTooltip = ({ active, payload, label }) => {
   if (active && payload && payload.length) {
     return (
@@ -77,9 +82,13 @@ const CustomTooltip = ({ active, payload, label }) => {
         {payload.map((entry, index) => {
           if (entry.dataKey.startsWith('trend')) return null;
           if (entry.value === null) return null;
+          
+          const scoreColor = entry.dataKey === 'Gemba' ? getColorGemba(entry.value) : getColor5S(entry.value);
+
           return (
             <div key={index} style={{ display: 'flex', justifyContent: 'space-between', gap: '15px', marginBottom: '5px' }}>
-              <span style={{ color: entry.color, fontWeight: 'bold' }}>{entry.name} : {entry.value}%</span>
+              <span style={{ color: '#e2e8f0', fontWeight: 'bold' }}>{entry.name} :</span>
+              <span style={{ color: scoreColor, fontWeight: 'bold' }}>{entry.value}%</span>
             </div>
           )
         })}
@@ -89,10 +98,28 @@ const CustomTooltip = ({ active, payload, label }) => {
   return null
 }
 
+// 🌟 POINT COLORÉ
 const CustomDot = (props) => {
   const { cx, cy, payload, dataKey } = props;
-  const fill = dataKey === 'Gemba' ? '#38bdf8' : '#f59e0b';
+  const value = payload[dataKey];
+  if (value === null || value === undefined) return null;
+
+  const fill = dataKey === 'Gemba' ? getColorGemba(value) : getColor5S(value);
   return <circle cx={cx} cy={cy} r={4} fill={fill} stroke="#0f172a" strokeWidth={1} />;
+};
+
+// 🌟 ÉTIQUETTE (VALEUR) COLORÉE
+const CustomLabel = (props) => {
+  const { x, y, value, dataKey } = props;
+  if (value === null || value === undefined) return null;
+  
+  const color = dataKey === 'Gemba' ? getColorGemba(value) : getColor5S(value);
+
+  return (
+    <text x={x} y={y - 8} fill={color} fontSize={10} fontWeight="bold" textAnchor="middle">
+      {value}%
+    </text>
+  );
 };
 
 export default function TendanceLigne() {
@@ -100,8 +127,7 @@ export default function TendanceLigne() {
   const [audits5S, setAudits5S] = useState([])
   const [loading, setLoading] = useState(true)
   
-  // 🌟 FILTRES
-  const [selectedType, setSelectedType] = useState('ALL') // 'ALL', 'GEMBA', '5S'
+  const [selectedType, setSelectedType] = useState('ALL')
   const [selectedLigne, setSelectedLigne] = useState('ALL')
   const [selectedWeek, setSelectedWeek] = useState('ALL')
 
@@ -130,7 +156,6 @@ export default function TendanceLigne() {
   const linesData = useMemo(() => {
     const groupedByLine = {}
 
-    // 1. Gemba (On l'ignore si le filtre est sur 5S)
     if (selectedType === 'ALL' || selectedType === 'GEMBA') {
       auditsGemba.forEach(a => {
         const ligne = a.ligne?.trim()
@@ -146,7 +171,6 @@ export default function TendanceLigne() {
       })
     }
 
-    // 2. 5S (On l'ignore si le filtre est sur Gemba)
     if (selectedType === 'ALL' || selectedType === '5S') {
       audits5S.forEach(a => {
         const ligne = a.zone?.trim()
@@ -162,7 +186,6 @@ export default function TendanceLigne() {
       })
     }
 
-    // 3. Transformation
     const result = Object.entries(groupedByLine).map(([ligne, dates]) => {
       const chartData = Object.entries(dates).map(([date, data]) => {
         const gembaScore = data.gemba_total > 0 ? Math.round((data.gemba_ok / data.gemba_total) * 100) : null;
@@ -170,7 +193,6 @@ export default function TendanceLigne() {
         return { date, Gemba: gembaScore, S5: s5Score };
       }).sort((a, b) => a.date.localeCompare(b.date));
 
-      // Si le filtre est GEMBA, on cache les scores S5, et inversement
       const finalChartData = chartData.map(d => ({
         ...d,
         Gemba: (selectedType === 'ALL' || selectedType === 'GEMBA') ? d.Gemba : null,
@@ -193,7 +215,7 @@ export default function TendanceLigne() {
         avgGemba,
         avg5S
       }
-    }).filter(line => line.totalAudits > 0) // Ne garder que les lignes avec des données
+    }).filter(line => line.totalAudits > 0)
 
     return result;
   }, [auditsGemba, audits5S, selectedWeek, selectedType])
@@ -207,13 +229,10 @@ export default function TendanceLigne() {
 
   return (
     <div>
-      {/* EN-TÊTE & FILTRES */}
       <div className="flex-between" style={{ marginBottom: '1.5rem', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
         <h1 style={{ fontSize: '1.5rem', margin: 0 }}>📈 Tendance par ligne</h1>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-          
-          {/* 🌟 FILTRE TYPE (GEMBA / 5S) */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <label style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>Type :</label>
             <select className="filter-control" value={selectedType} onChange={e => setSelectedType(e.target.value)} style={{ minWidth: '130px', fontWeight: 'bold' }}>
@@ -238,7 +257,6 @@ export default function TendanceLigne() {
               {allLignes.map(l => <option key={l} value={l}>{l}</option>)}
             </select>
           </div>
-
         </div>
       </div>
 
@@ -255,7 +273,6 @@ export default function TendanceLigne() {
           {filteredLines.map(line => (
             <div key={line.ligne} className="card" style={{ background: '#1e293b', padding: '1.5rem', borderRadius: '10px', border: '1px solid #334155' }}>
               
-              {/* EN-TÊTE CARTE */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
                 <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#f8fafc', margin: 0 }}>{line.ligne}</h2>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -265,10 +282,10 @@ export default function TendanceLigne() {
                 </div>
               </div>
 
-              {/* GRAPHIQUE */}
+              {/* 🌟 GRAPHIQUE */}
               <div style={{ height: selectedLigne === 'ALL' ? '250px' : '400px', width: '100%' }}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={line.chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <LineChart data={line.chartData} margin={{ top: 25, right: 10, left: -20, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
                     <XAxis dataKey="date" stroke="#94a3b8" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} dy={5} />
                     <YAxis domain={[0, 100]} unit="%" stroke="#94a3b8" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
@@ -278,37 +295,39 @@ export default function TendanceLigne() {
                     <ReferenceLine y={90} stroke="#38bdf8" strokeDasharray="3 3" />
                     <ReferenceLine y={85} stroke="#f59e0b" strokeDasharray="3 3" />
 
-                    {/* On n'affiche les lignes que si le filtre le permet */}
                     {(selectedType === 'ALL' || selectedType === 'GEMBA') && (
                       <>
                         <Line type="monotone" dataKey="trend_Gemba" stroke="#38bdf8" strokeWidth={1} strokeDasharray="5 5" dot={false} activeDot={false} name="Tend. Gemba" />
-                        <Line type="monotone" dataKey="Gemba" stroke="#38bdf8" strokeWidth={2} dot={<CustomDot />} activeDot={{ r: 6 }} name="Gemba" connectNulls />
+                        <Line type="monotone" dataKey="Gemba" stroke="#38bdf8" strokeWidth={2} dot={<CustomDot />} activeDot={{ r: 6 }} name="Gemba" connectNulls>
+                          <LabelList dataKey="Gemba" content={<CustomLabel dataKey="Gemba" />} />
+                        </Line>
                       </>
                     )}
 
                     {(selectedType === 'ALL' || selectedType === '5S') && (
                       <>
                         <Line type="monotone" dataKey="trend_S5" stroke="#f59e0b" strokeWidth={1} strokeDasharray="5 5" dot={false} activeDot={false} name="Tend. 5S" />
-                        <Line type="monotone" dataKey="S5" stroke="#f59e0b" strokeWidth={2} dot={<CustomDot />} activeDot={{ r: 6 }} name="5S" connectNulls />
+                        <Line type="monotone" dataKey="S5" stroke="#f59e0b" strokeWidth={2} dot={<CustomDot />} activeDot={{ r: 6 }} name="5S" connectNulls>
+                          <LabelList dataKey="S5" content={<CustomLabel dataKey="S5" />} />
+                        </Line>
                       </>
                     )}
                   </LineChart>
                 </ResponsiveContainer>
               </div>
 
-              {/* PIED DE CARTE */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid #334155' }}>
                 {(selectedType === 'ALL' || selectedType === 'GEMBA') && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#94a3b8', fontSize: '0.85rem' }}>
                     <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#38bdf8' }}></div>
-                    Moy Gemba : <span style={{ color: '#f8fafc', fontWeight: 'bold' }}>{line.avgGemba}%</span>
+                    Moy Gemba : <span style={{ color: getColorGemba(Number(line.avgGemba)), fontWeight: 'bold' }}>{line.avgGemba}%</span>
                   </div>
                 )}
                 
                 {(selectedType === 'ALL' || selectedType === '5S') && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#94a3b8', fontSize: '0.85rem' }}>
                     <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#f59e0b' }}></div>
-                    Moy 5S : <span style={{ color: '#f8fafc', fontWeight: 'bold' }}>{line.avg5S}%</span>
+                    Moy 5S : <span style={{ color: getColor5S(Number(line.avg5S)), fontWeight: 'bold' }}>{line.avg5S}%</span>
                   </div>
                 )}
               </div>

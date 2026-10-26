@@ -1,181 +1,243 @@
-import { useState, useMemo, useEffect } from 'react'
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, LabelList, ReferenceLine } from 'recharts'
-import { getWeekKey, getMonthKey, formatWeekLabel, formatMonthLabel } from '../utils/dateHelpers'
+import { useState, useEffect, useMemo } from 'react'
+import { supabase } from '../supabaseClient'
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine, Legend } from 'recharts'
 
-const axisStyle = { fontSize: 11, fill: '#94a3b8' }
-const COLORS = ['#3b82f6', '#f97316', '#10b981', '#8b5cf6', '#ec4899', '#f59e0b', '#06b6d4', '#ef4444']
+const extractDateString = (dateStr) => {
+  if (!dateStr) return null;
+  const str = String(dateStr).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.substring(0, 10);
+  if (/^\d{2}\/\d{2}\/\d{4}/.test(str)) {
+    const parts = str.split('/');
+    return `${parts[2]}-${parts[1]}-${parts[0]}`;
+  }
+  return null;
+}
 
-export default function TendanceLigne({ audits }) {
-  const [filterType, setFilterType] = useState('week') // 'week' ou 'month'
-  const [selectedPeriod, setSelectedPeriod] = useState('')
+const fetchAll = async (tableName) => {
+  let allData = []
+  let from = 0
+  const step = 1000
+  let hasMore = true
+  while (hasMore) {
+    const { data, error } = await supabase.from(tableName).select('*').order('date', { ascending: true }).range(from, from + step - 1)
+    if (error) { console.error(error); break }
+    if (data.length === 0) { hasMore = false } else { allData = [...allData, ...data]; from += step }
+  }
+  return allData
+}
 
-  // Listes de périodes
-  const weeks = useMemo(() => [...new Set(audits.map(a => getWeekKey(a.date)).filter(Boolean))].sort().reverse(), [audits])
-  const months = useMemo(() => [...new Set(audits.map(a => getMonthKey(a.date)).filter(Boolean))].sort().reverse(), [audits])
+const calculateTrendLine = (data, key) => {
+  const validData = data.filter(d => d[key] !== null);
+  if (validData.length < 2) return data;
+  
+  let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+  const n = validData.length;
+  
+  validData.forEach((point, index) => {
+    const y = point[key];
+    sumX += index;
+    sumY += y;
+    sumXY += index * y;
+    sumXX += index * index;
+  });
 
-  // Réinitialiser la sélection quand on change de type de filtre
-  useEffect(() => {
-    if (filterType === 'week') setSelectedPeriod(weeks[0] || '')
-    if (filterType === 'month') setSelectedPeriod(months[0] || '')
-  }, [filterType, weeks, months])
+  const slope = (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX);
+  const intercept = (sumY - slope * sumX) / n;
 
-  // Audits de la période sélectionnée (pour savoir QUOI afficher)
-  const periodAudits = useMemo(() => {
-    if (!selectedPeriod) return []
-    if (filterType === 'week') return audits.filter(a => getWeekKey(a.date) === selectedPeriod)
-    return audits.filter(a => getMonthKey(a.date) === selectedPeriod)
-  }, [audits, selectedPeriod, filterType])
+  return data.map((point) => {
+    if (point[key] === null) return { ...point, [`trend_${key}`]: null };
+    const index = validData.indexOf(point);
+    return { ...point, [`trend_${key}`]: Math.round(slope * index + intercept) };
+  });
+}
 
-  // Lignes uniques auditées dans cette période
-  const availableZones = useMemo(() => {
-    return [...new Set(periodAudits.map(a => a.zone).filter(Boolean))].sort()
-  }, [periodAudits])
-
-  // Préparation des données : L'HISTORIQUE COMPLET de chaque ligne
-  const historyData = useMemo(() => {
-    const dataByZone = {}
-    
-    availableZones.forEach(zone => {
-      // On récupère TOUS les audits de cette ligne (toutes semaines confondues)
-      const zoneAudits = audits.filter(a => a.zone === zone)
-      
-      // On regroupe par semaine
-      const byWeek = {}
-      zoneAudits.forEach(a => {
-        const wk = getWeekKey(a.date)
-        if (!wk) return
-        if (!byWeek[wk]) byWeek[wk] = { sum: 0, count: 0 }
-        byWeek[wk].sum += Number(a.score_pct)
-        byWeek[wk].count++
-      })
-
-      // On formate pour le graphique
-      dataByZone[zone] = Object.entries(byWeek)
-        .map(([wk, d]) => ({
-          weekKey: wk,
-          label: formatWeekLabel(wk),
-          score: Number((d.sum / d.count).toFixed(1))
-        }))
-        .sort((a, b) => a.weekKey.localeCompare(b.weekKey))
-    })
-
-    return dataByZone
-  }, [audits, availableZones])
-
-  // Label de la période sélectionnée
-  const selectedPeriodLabel = selectedPeriod 
-    ? (filterType === 'week' ? formatWeekLabel(selectedPeriod) : formatMonthLabel(selectedPeriod))
-    : ''
-
-  const CustomLabel = (props) => {
-    const { x, y, value, payload } = props
-    if (value === null || value === undefined) return null
-    
-    // On met en évidence si c'est dans la période sélectionnée
-    let isInPeriod = false
-    if (filterType === 'week' && payload) isInPeriod = payload.label === selectedPeriodLabel
-    if (filterType === 'month' && payload) {
-        // Verification simplifiée
-        const [year, month] = selectedPeriod.split('-')
-        const d = new Date(year, parseInt(month) - 1, 1)
-        const monthName = d.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
-        // La comparaison exacte de date serait mieux, mais on fait simple pour le label
-    }
-
+const CustomTooltip = ({ active, payload, label }) => {
+  if (active && payload && payload.length) {
     return (
-      <text x={x} y={y - 10} fill={isInPeriod ? '#3b82f6' : '#f8fafc'} fontSize={isInPeriod ? 12 : 10} fontWeight={isInPeriod ? 'bold' : 'normal'} textAnchor="middle">
-        {value}%
-      </text>
+      <div style={{ background: '#1e293b', border: '1px solid #334155', padding: '12px', borderRadius: '8px', color: 'white', boxShadow: '0 4px 6px rgba(0,0,0,0.3)' }}>
+        <p style={{ margin: '0 0 8px 0', fontWeight: 'bold', color: '#38bdf8' }}>Date : {label}</p>
+        {payload.map((entry, index) => {
+          if (entry.dataKey.startsWith('trend')) return null;
+          if (entry.value === null) return null;
+          return (
+            <div key={index} style={{ display: 'flex', justifyContent: 'space-between', gap: '15px', marginBottom: '5px' }}>
+              <span style={{ color: entry.color, fontWeight: 'bold' }}>{entry.name} : {entry.value}%</span>
+            </div>
+          )
+        })}
+      </div>
     )
   }
+  return null
+}
+
+const CustomDot = (props) => {
+  const { cx, cy, payload, dataKey } = props;
+  // On colore le point en fonction de la ligne (bleu pour Gemba, orange pour 5S)
+  const fill = dataKey === 'Gemba' ? '#38bdf8' : '#f59e0b';
+  return <circle cx={cx} cy={cy} r={4} fill={fill} stroke="#0f172a" strokeWidth={1} />;
+};
+
+export default function TendanceLigne() {
+  const [auditsGemba, setAuditsGemba] = useState([])
+  const [audits5S, setAudits5S] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [selectedLigne, setSelectedLigne] = useState('ALL')
+
+  useEffect(() => {
+    Promise.all([fetchAll('gemba_audits'), fetchAll('audits')]).then(([resGemba, res5S]) => {
+      setAuditsGemba(resGemba || [])
+      setAudits5S(res5S || [])
+      setLoading(false)
+    })
+  }, [])
+
+  const allLignes = useMemo(() => {
+    const set = new Set()
+    audits5S.forEach(a => { if (a.zone) set.add(a.zone.trim()) })
+    auditsGemba.forEach(a => { if (a.ligne) set.add(a.ligne.trim()) })
+    return Array.from(set).sort()
+  }, [auditsGemba, audits5S])
+
+  const linesData = useMemo(() => {
+    const groupedByLine = {}
+
+    // 1. Gemba
+    auditsGemba.forEach(a => {
+      const ligne = a.ligne?.trim()
+      const dStr = extractDateString(a.date)
+      if (!ligne || !dStr) return
+      if (!groupedByLine[ligne]) groupedByLine[ligne] = {}
+      if (!groupedByLine[ligne][dStr]) groupedByLine[ligne][dStr] = { gemba_ok: 0, gemba_total: 0, s5_sum: 0, s5_count: 0 }
+      groupedByLine[ligne][dStr].gemba_total++
+      if (String(a.reponse).toUpperCase() === 'OK') groupedByLine[ligne][dStr].gemba_ok++
+    })
+
+    // 2. 5S
+    audits5S.forEach(a => {
+      const ligne = a.zone?.trim()
+      const dStr = extractDateString(a.date)
+      if (!ligne || !dStr) return
+      if (!groupedByLine[ligne]) groupedByLine[ligne] = {}
+      if (!groupedByLine[ligne][dStr]) groupedByLine[ligne][dStr] = { gemba_ok: 0, gemba_total: 0, s5_sum: 0, s5_count: 0 }
+      groupedByLine[ligne][dStr].s5_sum += Number(a.score_pct) || 0
+      groupedByLine[ligne][dStr].s5_count++
+    })
+
+    // 3. Transformation
+    const result = Object.entries(groupedByLine).map(([ligne, dates]) => {
+      const chartData = Object.entries(dates).map(([date, data]) => {
+        const gembaScore = data.gemba_total > 0 ? Math.round((data.gemba_ok / data.gemba_total) * 100) : null;
+        const s5Score = data.s5_count > 0 ? Math.round(data.s5_sum / data.s5_count) : null;
+        return { date, Gemba: gembaScore, S5: s5Score };
+      }).sort((a, b) => a.date.localeCompare(b.date));
+
+      // Calcul des tendances
+      let withTrend = calculateTrendLine(chartData, 'Gemba');
+      withTrend = calculateTrendLine(withTrend, 'S5');
+
+      // KPI
+      const gembaData = chartData.filter(d => d.Gemba !== null);
+      const s5Data = chartData.filter(d => d.S5 !== null);
+      
+      const avgGemba = gembaData.length > 0 ? (gembaData.reduce((s, p) => s + p.Gemba, 0) / gembaData.length).toFixed(1) : '-';
+      const avg5S = s5Data.length > 0 ? (s5Data.reduce((s, p) => s + p.S5, 0) / s5Data.length).toFixed(1) : '-';
+
+      return {
+        ligne,
+        chartData: withTrend,
+        totalAudits: chartData.length,
+        avgGemba,
+        avg5S
+      }
+    })
+
+    return result;
+  }, [auditsGemba, audits5S])
+
+  const filteredLines = useMemo(() => {
+    if (selectedLigne === 'ALL') return linesData;
+    return linesData.filter(l => l.ligne === selectedLigne);
+  }, [linesData, selectedLigne])
+
+  if (loading) return <p className="muted" style={{ padding: '2rem' }}>Chargement des données…</p>
 
   return (
     <div>
-      <div className="flex-between" style={{ marginBottom: '1.5rem' }}>
-        <h1 style={{ fontSize: '1.5rem', margin: 0 }}>Tendance des audits par Période</h1>
-      </div>
-
-      <div className="card" style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center', marginBottom: '2rem' }}>
+      <div className="flex-between" style={{ marginBottom: '1.5rem', alignItems: 'center' }}>
+        <h1 style={{ fontSize: '1.5rem', margin: 0 }}>📈 Tendance par ligne (Gemba & 5S)</h1>
         
-        {/* Choix du type de filtre */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-          <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Type de filtre</label>
-          <select className="filter-control" value={filterType} onChange={e => setFilterType(e.target.value)}>
-            <option value="week">Par Semaine</option>
-            <option value="month">Par Mois</option>
-          </select>
-        </div>
-
-        {/* Sélection de la période */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', minWidth: '200px' }}>
-          <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Choisir la période</label>
-          <select className="filter-control" value={selectedPeriod} onChange={e => setSelectedPeriod(e.target.value)}>
-            <option value="">-- Sélectionner --</option>
-            {filterType === 'week' 
-              ? weeks.map(w => <option key={w} value={w}>{formatWeekLabel(w)}</option>)
-              : months.map(m => <option key={m} value={m}>{formatMonthLabel(m)}</option>)
-            }
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <label style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>Filtrer par ligne :</label>
+          <select 
+            className="filter-control" 
+            value={selectedLigne} 
+            onChange={e => setSelectedLigne(e.target.value)}
+            style={{ minWidth: '200px', fontWeight: 'bold' }}
+          >
+            <option value="ALL">Toutes les lignes</option>
+            {allLignes.map(l => <option key={l} value={l}>{l}</option>)}
           </select>
         </div>
       </div>
 
-      <div className="card">
-        <h2 className="card-title" style={{ marginBottom: '2rem', color: 'var(--primary)' }}>
-          Historique des lignes auditées en {selectedPeriodLabel}
-        </h2>
-        
-        {availableZones.length === 0 ? (
-          <div className="muted" style={{ padding: '3rem', textAlign: 'center' }}>
-            Aucun audit pour cette période.
-          </div>
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1.5rem' }}>
-            {availableZones.map((zone, idx) => {
-              const color = COLORS[idx % COLORS.length]
-              const zoneData = historyData[zone] || []
+      <div style={{ 
+        display: 'grid', 
+        gridTemplateColumns: selectedLigne === 'ALL' ? 'repeat(auto-fit, minmax(450px, 1fr))' : '1fr', 
+        gap: '2rem' 
+      }}>
+        {filteredLines.map(line => (
+          <div key={line.ligne} className="card" style={{ background: '#1e293b', padding: '1.5rem', borderRadius: '10px', border: '1px solid #334155' }}>
+            
+            {/* EN-TÊTE */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+              <h2 style={{ fontSize: '1.2rem', fontWeight: 'bold', color: '#f8fafc', margin: 0 }}>{line.ligne}</h2>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <span style={{ background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8', padding: '0.3rem 0.6rem', borderRadius: '20px', fontSize: '0.8rem', fontWeight: 'bold', border: '1px solid #38bdf8' }}>
+                  {line.totalAudits} audits
+                </span>
+              </div>
+            </div>
 
-              return (
-                <div key={zone} style={{ background: 'var(--bg-main)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
-                  <h3 style={{ margin: '0 0 1rem 0', fontSize: '0.9rem', color: color, fontWeight: 'bold' }}>
-                    Ligne : {zone} <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 'normal' }}>(Historique complet)</span>
-                  </h3>
+            {/* GRAPHIQUE */}
+            <div style={{ height: selectedLigne === 'ALL' ? '250px' : '400px', width: '100%' }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={line.chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                  <XAxis dataKey="date" stroke="#94a3b8" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} dy={5} />
+                  <YAxis domain={[0, 100]} unit="%" stroke="#94a3b8" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Legend wrapperStyle={{ paddingTop: '10px' }} />
                   
-                  <div style={{ height: 220 }}>
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={zoneData} margin={{ top: 25, right: 30, left: -20, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
-                        <XAxis dataKey="label" tick={axisStyle} axisLine={false} tickLine={false} dy={10} />
-                        <YAxis domain={[0, 100]} tick={axisStyle} axisLine={false} tickLine={false} />
-                        <Tooltip 
-                          contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8, color: '#fff' }}
-                          formatter={(v) => [`${v} %`, zone]}
-                          labelFormatter={(label) => `Semaine : ${label}`}
-                        />
-                        
-                        {/* Ligne verticale (uniquement si filtre par semaine) */}
-                        {filterType === 'week' && (
-                          <ReferenceLine x={selectedPeriodLabel} stroke="#64748b" strokeDasharray="3 3" label={{ position: 'top', value: 'Semaine choisie', fill: '#64748b', fontSize: 10 }} />
-                        )}
+                  {/* Objectifs */}
+                  <ReferenceLine y={90} stroke="#38bdf8" strokeDasharray="3 3" />
+                  <ReferenceLine y={85} stroke="#f59e0b" strokeDasharray="3 3" />
 
-                        <Line 
-                          type="monotone" 
-                          dataKey="score" 
-                          stroke={color} 
-                          strokeWidth={3} 
-                          dot={{ r: 5, fill: color, stroke: '#1e293b', strokeWidth: 2 }} 
-                          activeDot={{ r: 7 }} 
-                          connectNulls
-                        >
-                          <LabelList content={<CustomLabel />} />
-                        </Line>
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              )
-            })}
+                  {/* Courbes de tendance (Pointillés) */}
+                  <Line type="monotone" dataKey="trend_Gemba" stroke="#38bdf8" strokeWidth={1} strokeDasharray="5 5" dot={false} activeDot={false} name="Tend. Gemba" />
+                  <Line type="monotone" dataKey="trend_S5" stroke="#f59e0b" strokeWidth={1} strokeDasharray="5 5" dot={false} activeDot={false} name="Tend. 5S" />
+
+                  {/* Courbes Réelles */}
+                  <Line type="monotone" dataKey="Gemba" stroke="#38bdf8" strokeWidth={2} dot={<CustomDot />} activeDot={{ r: 6 }} name="Gemba" connectNulls />
+                  <Line type="monotone" dataKey="S5" stroke="#f59e0b" strokeWidth={2} dot={<CustomDot />} activeDot={{ r: 6 }} name="5S" connectNulls />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* PIED DE LA CARTE (KPI) */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.5rem', paddingTop: '1rem', borderTop: '1px solid #334155' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#94a3b8', fontSize: '0.85rem' }}>
+                <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#38bdf8' }}></div>
+                Moy Gemba : <span style={{ color: '#f8fafc', fontWeight: 'bold' }}>{line.avgGemba}%</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#94a3b8', fontSize: '0.85rem' }}>
+                <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#f59e0b' }}></div>
+                Moy 5S : <span style={{ color: '#f8fafc', fontWeight: 'bold' }}>{line.avg5S}%</span>
+              </div>
+            </div>
+
           </div>
-        )}
+        ))}
       </div>
     </div>
   )

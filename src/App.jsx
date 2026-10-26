@@ -127,6 +127,7 @@ export default function App() {
         {currentView === 'tv' && <TvDashboard />}
           {currentView === 'tv' && <TvDashboard />}
           {currentView === 'resultats_s1' && <ResultatsS1 />}
+          {currentView === 'tendance_ligne' && <TendanceLigne />}
           {currentView === 'mes_actions' && <MesActions userEmail={session.user.email} />}
         {currentView === 'parametres' && <Parametres />}
         {currentView === 'historique' && <HistoriqueActions userEmail={session.user.email} role={role} />}

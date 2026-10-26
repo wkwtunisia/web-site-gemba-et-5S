@@ -88,33 +88,47 @@ export default function GembaAnalyse() {
     })
   }, [data, startDate, endDate, weekFilter])
 
-  // 🌟 CALCUL DES KPI PAR UAP (En utilisant la colonne 'uap')
-  const kpis = useMemo(() => {
-    const uaps = { 'UAP 1': { ok: 0, total: 0 }, 'UAP 2': { ok: 0, total: 0 }, 'Logistique': { ok: 0, total: 0 }, 'Usine': { ok: 0, total: 0 } }
-    
+  // 🌟 1. REGROUPEMENT PAR AUDIT (Date + Ligne) POUR CALCULER LE SCORE DE CHAQUE AUDIT
+  const groupedAudits = useMemo(() => {
+    const groups = {}
     filteredData.forEach(row => {
-      const uap = (row.uap || '').trim()
-      const rep = String(row.reponse).toUpperCase()
-      if (rep === 'N/A') return
+      const date = extractDateString(row.date)
+      const ligne = row.ligne?.trim()
+      if (!date || !ligne) return
 
-      // Global Usine
-      uaps['Usine'].total++
-      if (rep === 'OK') uaps['Usine'].ok++
+      const auditKey = `${date}|${ligne}`
+      if (!groups[auditKey]) {
+        groups[auditKey] = { date, ligne, uap: (row.uap || '').trim(), ok: 0, total: 0 }
+      }
+      if (String(row.reponse).toUpperCase() !== 'N/A') {
+        groups[auditKey].total++
+        if (String(row.reponse).toUpperCase() === 'OK') groups[auditKey].ok++
+      }
+    })
+    return Object.values(groups).map(g => ({
+      ...g,
+      score: g.total > 0 ? Math.round((g.ok / g.total) * 100) : 0
+    }))
+  }, [filteredData])
 
-      // Par UAP
+  // 🌟 2. CALCUL DES KPI (Moyenne des scores des audits)
+  const kpis = useMemo(() => {
+    const uaps = { 'UAP 1': [], 'UAP 2': [], 'Logistique': [], 'Usine': [] }
+
+    groupedAudits.forEach(audit => {
+      const uap = audit.uap.toUpperCase()
+      uaps['Usine'].push(audit.score)
+
       if (uap.includes('UAP 1') || uap.includes('UAP1')) {
-        uaps['UAP 1'].total++
-        if (rep === 'OK') uaps['UAP 1'].ok++
+        uaps['UAP 1'].push(audit.score)
       } else if (uap.includes('UAP 2') || uap.includes('UAP2')) {
-        uaps['UAP 2'].total++
-        if (rep === 'OK') uaps['UAP 2'].ok++
+        uaps['UAP 2'].push(audit.score)
       } else if (uap.includes('LOG')) {
-        uaps['Logistique'].total++
-        if (rep === 'OK') uaps['Logistique'].ok++
+        uaps['Logistique'].push(audit.score)
       }
     })
 
-    const calcAvg = (data) => data.total === 0 ? 0 : Math.round((data.ok / data.total) * 100)
+    const calcAvg = (arr) => arr.length === 0 ? 0 : Math.round(arr.reduce((a, b) => a + b, 0) / arr.length)
 
     return {
       uap1: calcAvg(uaps['UAP 1']),
@@ -122,9 +136,9 @@ export default function GembaAnalyse() {
       logistique: calcAvg(uaps['Logistique']),
       usine: calcAvg(uaps['Usine'])
     }
-  }, [filteredData])
+  }, [groupedAudits])
 
-  // 🌟 CALCUL DES DONNÉES DE TENDANCE
+  // 🌟 3. CALCUL DES DONNÉES DE TENDANCE (Basé sur la moyenne des audits)
   const trendData = useMemo(() => {
     let groupBy = 'month'
     if (weekFilter) groupBy = 'day'
@@ -132,27 +146,21 @@ export default function GembaAnalyse() {
 
     const groups = {}
 
-    filteredData.forEach(a => {
-      const dStr = extractDateString(a.date)
-      if (!dStr) return
-      const rep = String(a.reponse).toUpperCase()
-      if (rep === 'N/A') return
-
+    groupedAudits.forEach(audit => {
       let key = ''
-      if (groupBy === 'month') key = dStr.substring(0, 7)
-      if (groupBy === 'week') key = getWeekNumber(a.date)
-      if (groupBy === 'day') key = dStr
+      if (groupBy === 'month') key = audit.date.substring(0, 7)
+      if (groupBy === 'week') key = getWeekNumber(audit.date)
+      if (groupBy === 'day') key = audit.date
 
       if (!key) return
       if (!groups[key]) groups[key] = { key, uap1: [], uap2: [], logistique: [], usine: [] }
 
-      const score = rep === 'OK' ? 100 : 0
-      groups[key].usine.push(score)
+      groups[key].usine.push(audit.score)
       
-      const uap = (a.uap || '').trim()
-      if (uap.includes('UAP 1') || uap.includes('UAP1')) groups[key].uap1.push(score)
-      else if (uap.includes('UAP 2') || uap.includes('UAP2')) groups[key].uap2.push(score)
-      else if (uap.includes('LOG')) groups[key].logistique.push(score)
+      const uap = audit.uap.toUpperCase()
+      if (uap.includes('UAP 1') || uap.includes('UAP1')) groups[key].uap1.push(audit.score)
+      else if (uap.includes('UAP 2') || uap.includes('UAP2')) groups[key].uap2.push(audit.score)
+      else if (uap.includes('LOG')) groups[key].logistique.push(audit.score)
     })
 
     const calcAvgForArr = (arr) => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : null
@@ -176,7 +184,7 @@ export default function GembaAnalyse() {
         usine: calcAvgForArr(g.usine)
       }
     }).sort((a, b) => String(a.key).localeCompare(String(b.key)))
-  }, [filteredData, startDate, endDate, weekFilter])
+  }, [groupedAudits, startDate, endDate, weekFilter])
 
   const KpiCard = ({ title, score }) => (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '1.5rem' }}>

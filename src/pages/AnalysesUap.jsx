@@ -8,10 +8,10 @@ const UAP_CONFIG = {
   usine: { title: 'Usine', color: '#10b981' }
 }
 
-const getColor = (score) => score >= 80 ? '#10b981' : score >= 60 ? '#f59e0b' : '#ef4444'
+// 🌟 LOGIQUE DE COULEURS (5S)
+const getColor = (score) => score >= 86 ? '#10b981' : score >= 80 ? '#f59e0b' : '#ef4444'
 const axisStyle = { fontSize: 12, fill: '#94a3b8' }
 
-// 🌟 FONCTION POUR EXTRAIRE LA DATE AU FORMAT YYYY-MM-DD (Sans bug de fuseau)
 const extractDateString = (dateStr) => {
   if (!dateStr) return null;
   const str = String(dateStr).trim();
@@ -29,7 +29,6 @@ const extractDateString = (dateStr) => {
   return null;
 }
 
-// 🌟 CALCUL DU NUMÉRO DE SEMAINE
 const getWeekNumber = (dateStr) => {
   const dateOnly = extractDateString(dateStr);
   if (!dateOnly) return null;
@@ -53,7 +52,6 @@ export default function AnalysesUap({ audits }) {
   const [endDate, setEndDate] = useState('')
   const [weekFilter, setWeekFilter] = useState('')
 
-  // 🌟 LISTE DES SEMAINES DISPONIBLES
   const availableWeeks = useMemo(() => {
     const set = new Set()
     audits.forEach(a => {
@@ -63,19 +61,13 @@ export default function AnalysesUap({ audits }) {
     return Array.from(set).sort()
   }, [audits])
 
-  // 🌟 FILTRAGE DES DONNÉES
   const filteredAudits = useMemo(() => {
     return audits.filter(a => {
       const dStr = extractDateString(a.date)
       if (!dStr) return false
-
-      // Filtre par date Du / Au
       if (startDate && dStr < startDate) return false
       if (endDate && dStr > endDate) return false
-
-      // Filtre par Semaine
       if (weekFilter && getWeekNumber(a.date) !== weekFilter) return false
-
       return true
     })
   }, [audits, startDate, endDate, weekFilter])
@@ -84,38 +76,43 @@ export default function AnalysesUap({ audits }) {
   const isLogistique = (z) => UAP_CONFIG.logistique.zones.includes(z?.trim())
   const isUap2 = (z) => !isUap1(z) && !isLogistique(z)
 
+  // 🌟 1. CALCUL DES KPI (Moyenne des score_pct)
   const kpis = useMemo(() => {
-    const calcAvg = (arr) => arr.length === 0 ? 0 : Number((arr.reduce((acc, a) => acc + Number(a.score_pct || 0), 0) / arr.length).toFixed(1))
-    const uap1Audits = filteredAudits.filter(a => isUap1(a.zone))
-    const uap2Audits = filteredAudits.filter(a => isUap2(a.zone))
-    const logAudits = filteredAudits.filter(a => isLogistique(a.zone))
+    const uaps = { 'UAP 1': [], 'UAP 2': [], 'Logistique': [], 'Usine': [] }
+
+    filteredAudits.forEach(a => {
+      const score = Number(a.score_pct) || 0
+      uaps['Usine'].push(score)
+
+      if (isUap1(a.zone)) uaps['UAP 1'].push(score)
+      else if (isLogistique(a.zone)) uaps['Logistique'].push(score)
+      else uaps['UAP 2'].push(score)
+    })
+
+    const calcAvg = (arr) => arr.length === 0 ? 0 : Math.round(arr.reduce((a, b) => a + b, 0) / arr.length)
 
     return {
-      uap1: calcAvg(uap1Audits),
-      uap2: calcAvg(uap2Audits),
-      logistique: calcAvg(logAudits),
-      usine: calcAvg(filteredAudits)
+      uap1: calcAvg(uaps['UAP 1']),
+      uap2: calcAvg(uaps['UAP 2']),
+      logistique: calcAvg(uaps['Logistique']),
+      usine: calcAvg(uaps['Usine'])
     }
   }, [filteredAudits])
 
+  // 🌟 2. CALCUL DES TENDANCES (Moyenne des score_pct)
   const trendData = useMemo(() => {
     let groupBy = 'month'
-    
-    // 🌟 ADAPTATION DE L'AFFICHAGE SELON LE FILTRE
-    if (weekFilter) {
-      groupBy = 'day'
-    } else if (startDate || endDate) {
-      groupBy = 'week'
-    }
+    if (weekFilter) groupBy = 'day'
+    else if (startDate || endDate) groupBy = 'week'
 
     const groups = {}
 
     filteredAudits.forEach(a => {
       const dStr = extractDateString(a.date)
       if (!dStr) return
-      
+
       let key = ''
-      if (groupBy === 'month') key = dStr.substring(0, 7) // YYYY-MM
+      if (groupBy === 'month') key = dStr.substring(0, 7)
       if (groupBy === 'week') key = getWeekNumber(a.date)
       if (groupBy === 'day') key = dStr
 
@@ -129,29 +126,27 @@ export default function AnalysesUap({ audits }) {
       else groups[key].uap2.push(score)
     })
 
-    const calcAvgForArr = (arr) => arr.length ? Number((arr.reduce((a, b) => a + b, 0) / arr.length).toFixed(1)) : null
+    const calcAvgForArr = (arr) => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : null
 
-    return Object.values(groups)
-      .map(g => {
-        let label = g.key
-        if (groupBy === 'month') {
-          const date = new Date(`${g.key}-01T12:00:00`)
-          label = date.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' })
-        } else if (groupBy === 'day') {
-          const date = new Date(`${g.key}T12:00:00`)
-          label = date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })
-        }
+    return Object.values(groups).map(g => {
+      let label = g.key
+      if (groupBy === 'month') {
+        const date = new Date(`${g.key}-01T12:00:00`)
+        label = date.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' })
+      } else if (groupBy === 'day') {
+        const date = new Date(`${g.key}T12:00:00`)
+        label = date.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })
+      }
 
-        return {
-          label,
-          key: g.key,
-          uap1: calcAvgForArr(g.uap1),
-          uap2: calcAvgForArr(g.uap2),
-          logistique: calcAvgForArr(g.logistique),
-          usine: calcAvgForArr(g.usine)
-        }
-      })
-      .sort((a, b) => String(a.key).localeCompare(String(b.key)))
+      return {
+        label,
+        key: g.key,
+        uap1: calcAvgForArr(g.uap1),
+        uap2: calcAvgForArr(g.uap2),
+        logistique: calcAvgForArr(g.logistique),
+        usine: calcAvgForArr(g.usine)
+      }
+    }).sort((a, b) => String(a.key).localeCompare(String(b.key)))
   }, [filteredAudits, startDate, endDate, weekFilter])
 
   const KpiCard = ({ title, score }) => (
@@ -180,7 +175,7 @@ export default function AnalysesUap({ audits }) {
       <div className="card" style={{ padding: '1rem' }}>
         <h3 style={{ margin: '0 0 1rem 0', fontSize: '1rem', color: color }}>{title}</h3>
         {!hasData ? (
-          <div className="muted" style={{ height: 250, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Aucune donnée pour cette période</div>
+          <div className="muted" style={{ height: 250, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Aucune donnée</div>
         ) : (
           <div style={{ height: 260 }}>
             <ResponsiveContainer width="100%" height="100%">
@@ -213,12 +208,10 @@ export default function AnalysesUap({ audits }) {
 
   return (
     <div>
-      <div className="flex-between" style={{ marginBottom: '1.5rem', alignItems: 'center' }}>
-        <h1 style={{ fontSize: '1.5rem', margin: 0 }}>Analyses par UAP</h1>
+      <div className="flex-between" style={{ marginBottom: '1.5rem', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+        <h1 style={{ fontSize: '1.5rem', margin: 0 }}>Analyses par UAP (5S)</h1>
         
-        {/* 🌟 FILTRES DE DATE ET SEMAINE */}
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', background: 'var(--surface)', padding: '0.4rem 0.8rem', borderRadius: '8px', border: '1px solid var(--border)' }}>
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               <label style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Du</label>

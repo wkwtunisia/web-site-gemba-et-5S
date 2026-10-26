@@ -1,3 +1,4 @@
+import ResultatsS1 from './pages/ResultatsS1'
 import TvDashboard from './pages/TvDashboard'
 import { useState, useEffect } from 'react'
 import Sidebar from './components/Sidebar'
@@ -124,6 +125,8 @@ export default function App() {
         )}
 
         {currentView === 'tv' && <TvDashboard />}
+          {currentView === 'tv' && <TvDashboard />}
+          {currentView === 'resultats_s1' && <ResultatsS1 />}
           {currentView === 'mes_actions' && <MesActions userEmail={session.user.email} />}
         {currentView === 'parametres' && <Parametres />}
         {currentView === 'historique' && <HistoriqueActions userEmail={session.user.email} role={role} />}

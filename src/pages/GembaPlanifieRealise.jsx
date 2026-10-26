@@ -4,26 +4,36 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGri
 
 const OBJECTIF_SEMAINE = 5
 
-const parseDate = (dateStr) => {
-  if (!dateStr) return null
-  let d = new Date(dateStr)
-  if (!isNaN(d.getTime())) return d
-  const str = String(dateStr).trim()
-  const match = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/)
+const normalizeToYYYYMMDD = (dateStr) => {
+  if (!dateStr) return null;
+  const str = String(dateStr).trim();
+
+  let match = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (match) return `${match[1]}-${String(match[2]).padStart(2, '0')}-${String(match[3]).padStart(2, '0')}`;
+
+  match = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+  if (match) return `${match[3]}-${String(match[2]).padStart(2, '0')}-${String(match[1]).padStart(2, '0')}`;
+
+  const months = { jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06', jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12' };
+  match = str.match(/^(\d{1,2})[-\s]([a-zA-Z]{3})[-\s](\d{4})/);
   if (match) {
-    d = new Date(`${match[3]}-${match[2]}-${match[1]}`)
-    if (!isNaN(d.getTime())) return d
+    const month = months[match[2].toLowerCase()];
+    if (month) return `${match[3]}-${month}-${String(match[1]).padStart(2, '0')}`;
   }
-  const matchISO = str.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/)
-  if (matchISO) {
-    d = new Date(`${matchISO[1]}-${matchISO[2]}-${matchISO[3]}`)
-    if (!isNaN(d.getTime())) return d
+
+  const d = new Date(str);
+  if (!isNaN(d.getTime())) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
-  return null
+  return null;
 }
 
-function getWeekNum(d) {
-  if (!d) return null
+const getWeekNum = (dateStr) => {
+  const dateOnly = normalizeToYYYYMMDD(dateStr);
+  if (!dateOnly) return null;
+  const d = new Date(`${dateOnly}T12:00:00`);
+  if (isNaN(d.getTime())) return null;
+
   const target = new Date(d.valueOf());
   const dayNr = (d.getDay() + 6) % 7;
   target.setDate(target.getDate() - dayNr + 3); 
@@ -35,6 +45,19 @@ function getWeekNum(d) {
   return 1 + Math.ceil((firstThursday - target) / 604800000);
 }
 
+const fetchAllGemba = async () => {
+  let allData = []
+  let from = 0
+  const step = 1000
+  let hasMore = true
+  while (hasMore) {
+    const { data, error } = await supabase.from('gemba_audits').select('*').order('date', { ascending: false }).range(from, from + step - 1)
+    if (error) { console.error(error); break }
+    if (data.length === 0) { hasMore = false } else { allData = [...allData, ...data]; from += step }
+  }
+  return allData
+}
+
 export default function GembaPlanifieRealise() {
   const [data, setData] = useState([])
   const [loading, setLoading] = useState(true)
@@ -42,33 +65,20 @@ export default function GembaPlanifieRealise() {
   const [endDate, setEndDate] = useState('')
 
   useEffect(() => {
-    let allData = []
-    const fetchData = async () => {
-      let from = 0
-      const step = 1000
-      let hasMore = true
-      while(hasMore) {
-        const { data: chunk, error } = await supabase.from('gemba_audits').select('*').order('date', { ascending: true }).range(from, from + step - 1)
-        if (error) break
-        if (chunk.length === 0) hasMore = false
-        else { allData = [...allData, ...chunk]; from += step }
-      }
-      setData(allData)
+    fetchAllGemba().then(res => {
+      setData(res)
       setLoading(false)
-    }
-    fetchData()
+    })
   }, [])
 
   const isWithinDateRange = (dateStr) => {
-    if (!startDate && !endDate) return true
-    const d = parseDate(dateStr)
-    if (!d) return false
-    const s = startDate ? new Date(startDate) : new Date(0)
-    const e = endDate ? new Date(endDate) : new Date(8640000000000000)
-    s.setHours(0, 0, 0, 0)
-    e.setHours(23, 59, 59, 999)
-    d.setHours(12, 0, 0, 0)
-    return d >= s && d <= e
+    if (!startDate && !endDate) return true;
+    const dStr = normalizeToYYYYMMDD(dateStr);
+    if (!dStr) return false;
+
+    if (startDate && dStr < startDate) return false;
+    if (endDate && dStr > endDate) return false;
+    return true;
   }
 
   const filtered = useMemo(() => data.filter(d => isWithinDateRange(d.date)), [data, startDate, endDate])
@@ -88,8 +98,7 @@ export default function GembaPlanifieRealise() {
     const weeksMap = {}
     
     auditsGrouped.forEach(audit => {
-      const d = parseDate(audit.date)
-      const weekNum = getWeekNum(d)
+      const weekNum = getWeekNum(audit.date)
       if (!weekNum) return
       const label = `S${String(weekNum).padStart(2, '0')}`
       if (!weeksMap[label]) weeksMap[label] = 0

@@ -12,7 +12,10 @@ const extractDateString = (dateStr) => {
   return null;
 }
 
-const getWeekNumber = (dateStr) => {
+const getWeekNumber = (dateStr, rawSemaine) => {
+  if (rawSemaine !== undefined && rawSemaine !== null && rawSemaine !== '') {
+    return `S${String(rawSemaine).padStart(2, '0')}`
+  }
   const dateOnly = extractDateString(dateStr);
   if (!dateOnly) return null;
   const d = new Date(`${dateOnly}T12:00:00`);
@@ -22,6 +25,17 @@ const getWeekNumber = (dateStr) => {
   target.setMonth(0, 1);
   if (target.getDay() !== 4) target.setMonth(0, 1 + ((4 - target.getDay()) + 7) % 7);
   return `S${String(1 + Math.ceil((firstThursday - target) / 604800000)).padStart(2, '0')}`;
+}
+
+const getStandard5M = (point_m) => {
+  if (!point_m) return null
+  const clean = String(point_m).trim().toLowerCase()
+  if (clean.includes("main d'œuvre") || clean.includes("main d'oeuvre") || clean.includes("main d'oeuvre")) return "Main d'œuvre"
+  if (clean.includes('matière') || clean.includes('matiere')) return 'Matière'
+  if (clean.includes('méthode') || clean.includes('methode')) return 'Méthode'
+  if (clean.includes('milieu')) return 'Milieu'
+  if (clean.includes('maintenance')) return 'Maintenance'
+  return null;
 }
 
 const fetchAllGemba = async () => {
@@ -44,7 +58,7 @@ export default function GembaAnalyse() {
   useEffect(() => { fetchAllGemba().then(res => { setData(res || []); setLoading(false); }) }, [])
 
   const availableWeeks = useMemo(() => {
-    const set = new Set(); data.forEach(a => { const w = getWeekNumber(a.date); if (w) set.add(w); }); return Array.from(set).sort()
+    const set = new Set(); data.forEach(a => { const w = getWeekNumber(a.date, a.semaine); if (w) set.add(w); }); return Array.from(set).sort()
   }, [data])
 
   const filteredData = useMemo(() => {
@@ -52,32 +66,58 @@ export default function GembaAnalyse() {
       const dStr = extractDateString(row.date); if (!dStr) return false
       if (startDate && dStr < startDate) return false
       if (endDate && dStr > endDate) return false
-      if (weekFilter && getWeekNumber(row.date) !== weekFilter) return false
+      if (weekFilter && getWeekNumber(row.date, row.semaine) !== weekFilter) return false
       return true
     })
   }, [data, startDate, endDate, weekFilter])
 
+  // 🌟 FONCTION DE FILTRE POUR IGNORER LES NOMS DES PILIERS
+  const isValidProblem = (q) => {
+    if (!q) return false;
+    const clean = String(q).trim().toUpperCase();
+    // On ignore les questions qui sont juste le nom du pilier
+    const isGeneric = ['MILIEU', 'MATIÈRE', 'MATIERE', 'MÉTHODE', 'METHODE', 'MAINTENANCE', "MAIN D'OEUVRE", "MAIN D'ŒUVRE"].includes(clean);
+    return !isGeneric;
+  };
+
   const topNok = useMemo(() => {
     const nokCount = {}
-    filteredData.forEach(row => { if (String(row.reponse).toUpperCase() === 'NOK') nokCount[row.question] = (nokCount[row.question] || 0) + 1 })
+    filteredData.forEach(row => { 
+      if (String(row.reponse).toUpperCase() === 'NOK' && isValidProblem(row.question)) {
+        nokCount[row.question] = (nokCount[row.question] || 0) + 1 
+      }
+    })
     return Object.entries(nokCount).map(([q, count]) => ({ q, count })).sort((a, b) => b.count - a.count).slice(0, 5)
   }, [filteredData])
 
   const topOk = useMemo(() => {
     const okCount = {}
-    filteredData.forEach(row => { if (String(row.reponse).toUpperCase() === 'OK') okCount[row.question] = (okCount[row.question] || 0) + 1 })
+    filteredData.forEach(row => { 
+      if (String(row.reponse).toUpperCase() === 'OK' && isValidProblem(row.question)) {
+        okCount[row.question] = (okCount[row.question] || 0) + 1 
+      }
+    })
     return Object.entries(okCount).map(([q, count]) => ({ q, count })).sort((a, b) => b.count - a.count).slice(0, 5)
   }, [filteredData])
 
   const pillarStats = useMemo(() => {
     const groups = {}
     filteredData.forEach(row => {
-      if (!row.point_m) return
-      const rep = String(row.reponse).toUpperCase(); if (rep === 'N/A') return
-      if (!groups[row.point_m]) groups[row.point_m] = { ok: 0, total: 0 }
-      groups[row.point_m].total++; if (rep === 'OK') groups[row.point_m].ok++
+      const rep = String(row.reponse).toUpperCase()
+      if (rep === 'N/A') return
+      
+      const pilier = getStandard5M(row.point_m)
+      if (!pilier) return 
+
+      if (!groups[pilier]) groups[pilier] = { ok: 0, total: 0 }
+      groups[pilier].total++
+      if (rep === 'OK') groups[pilier].ok++
     })
-    return Object.entries(groups).map(([name, s]) => ({ name, score: Math.round((s.ok / s.total) * 100) })).sort((a, b) => b.score - a.score)
+    
+    return Object.entries(groups).map(([name, s]) => ({ 
+      name, 
+      score: s.total > 0 ? Math.round((s.ok / s.total) * 100) : 0 
+    })).sort((a, b) => b.score - a.score)
   }, [filteredData])
 
   const bestPillar = pillarStats[0] || { name: '-', score: 0 }
@@ -117,9 +157,9 @@ export default function GembaAnalyse() {
       </div>
       <div className="grid-2">
         <div className="card">
-          <h3 style={{ margin: '0 0 1.5rem 0', fontSize: '1.1rem', color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}><span>⚠️</span> Top 5 des problèmes (NOK)</h3>
+          <h3 style={{ margin: '0 0 1.5rem 0', fontSize: '1.1rem', color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}><span>⚠️</span> Top 5 des vrais problèmes (NOK)</h3>
           <ul className="top-list">
-            {topNok.length === 0 ? <p className="muted">Aucun problème détecté.</p> : topNok.map((item, i) => (
+            {topNok.length === 0 ? <p className="muted">Aucun problème spécifique détecté.</p> : topNok.map((item, i) => (
               <li key={i} style={{ background: 'var(--bg-main)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '0.5rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}><span style={{ fontWeight: 'bold', color: 'var(--danger)' }}>Problème #{i + 1}</span><span className="badge bad">{item.count} NOK</span></div>
                 <div style={{ fontSize: '0.875rem', whiteSpace: 'normal' }}>{item.q}</div>

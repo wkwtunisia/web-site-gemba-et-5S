@@ -1,3 +1,4 @@
+import GembaPiliers from './pages/GembaPiliers'
 import AnalyseRepetitive from './pages/AnalyseRepetitive'
 import GembaUap from './pages/GembaUap'
 import ResultatsS1 from './pages/ResultatsS1'

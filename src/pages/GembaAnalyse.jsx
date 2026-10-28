@@ -71,55 +71,76 @@ export default function GembaAnalyse() {
     })
   }, [data, startDate, endDate, weekFilter])
 
-  // 🌟 CALCUL DU NOMBRE TOTAL D'AUDITS
-  const totalAudits = useMemo(() => {
-    const uniqueAudits = new Set()
-    filteredData.forEach(row => uniqueAudits.add(`${row.date}|${row.ligne}`))
-    return uniqueAudits.size
+  // 🌟 DÉDUPLICATION : On ne garde qu'une seule ligne par (Date + Ligne + Question)
+  const uniqueData = useMemo(() => {
+    const seen = new Set()
+    return filteredData.filter(row => {
+      const key = `${row.date}|${row.ligne}|${row.question}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
   }, [filteredData])
 
-  // 🌟 FILTRE MAGIQUE POUR IGNORER LES CATÉGORIES
   const isValidProblem = (row) => {
     if (!row.question) return false;
     const cleanQ = String(row.question).trim().toUpperCase();
     const cleanM = String(row.point_m || '').trim().toUpperCase();
     
-    // Si la question est exactement le nom du pilier ou de la catégorie
     if (cleanQ === cleanM && cleanQ !== '') return false;
-
-    // Si c'est un nom générique
     const isGeneric = ['MILIEU', 'MATIÈRE', 'MATIERE', 'MÉTHODE', 'METHODE', 'MAINTENANCE', "MAIN D'OEUVRE", "MAIN D'ŒUVRE", 'OK DÉMARRAGE', 'OK DEMARRAGE'].includes(cleanQ);
     if (isGeneric) return false;
-
-    // Si ça contient (OK démarrage)
     if (cleanQ.includes('(OK DÉMARRAGE)') || cleanQ.includes('(OK DEMARRAGE)')) return false;
     
     return true;
   };
 
+  // On utilise uniqueData au lieu de filteredData pour les calculs
   const topNok = useMemo(() => {
-    const nokCount = {}
-    filteredData.forEach(row => { 
-      if (String(row.reponse).toUpperCase() === 'NOK' && isValidProblem(row)) {
-        nokCount[row.question] = (nokCount[row.question] || 0) + 1 
-      }
+    const stats = {}
+    uniqueData.forEach(row => { 
+      const rep = String(row.reponse).toUpperCase()
+      if (rep === 'N/A' || !isValidProblem(row)) return
+      
+      const q = row.question
+      if (!stats[q]) stats[q] = { ok: 0, nok: 0, total: 0 }
+      
+      stats[q].total++
+      if (rep === 'NOK') stats[q].nok++
+      else if (rep === 'OK') stats[q].ok++
     })
-    return Object.entries(nokCount).map(([q, count]) => ({ q, count })).sort((a, b) => b.count - a.count).slice(0, 5)
-  }, [filteredData])
+    
+    return Object.entries(stats)
+      .map(([q, s]) => ({ q, nok: s.nok, total: s.total }))
+      .filter(s => s.nok > 0)
+      .sort((a, b) => b.nok - a.nok)
+      .slice(0, 5)
+  }, [uniqueData])
 
   const topOk = useMemo(() => {
-    const okCount = {}
-    filteredData.forEach(row => { 
-      if (String(row.reponse).toUpperCase() === 'OK' && isValidProblem(row)) {
-        okCount[row.question] = (okCount[row.question] || 0) + 1 
-      }
+    const stats = {}
+    uniqueData.forEach(row => { 
+      const rep = String(row.reponse).toUpperCase()
+      if (rep === 'N/A' || !isValidProblem(row)) return
+      
+      const q = row.question
+      if (!stats[q]) stats[q] = { ok: 0, nok: 0, total: 0 }
+      
+      stats[q].total++
+      if (rep === 'OK') stats[q].ok++
+      else if (rep === 'NOK') stats[q].nok++
     })
-    return Object.entries(okCount).map(([q, count]) => ({ q, count })).sort((a, b) => b.count - a.count).slice(0, 5)
-  }, [filteredData])
+    
+    return Object.entries(stats)
+      .map(([q, s]) => ({ q, ok: s.ok, total: s.total }))
+      .filter(s => s.ok > 0)
+      .sort((a, b) => b.ok - a.ok)
+      .slice(0, 5)
+  }, [uniqueData])
 
   const pillarStats = useMemo(() => {
     const groups = {}
-    filteredData.forEach(row => {
+    uniqueData.forEach(row => {
       const rep = String(row.reponse).toUpperCase()
       if (rep === 'N/A') return
       const pilier = getStandard5M(row.point_m)
@@ -132,7 +153,7 @@ export default function GembaAnalyse() {
       name, 
       score: s.total > 0 ? Math.round((s.ok / s.total) * 100) : 0 
     })).sort((a, b) => b.score - a.score)
-  }, [filteredData])
+  }, [uniqueData])
 
   const bestPillar = pillarStats[0] || { name: '-', score: 0 }
   const worstPillar = pillarStats[pillarStats.length - 1] || { name: '-', score: 0 }
@@ -157,19 +178,35 @@ export default function GembaAnalyse() {
           <button className="btn btn-secondary" onClick={() => { setStartDate(''); setEndDate(''); setWeekFilter(''); }} style={{ height: '36px', marginTop: 'auto' }}>Réinitialiser</button>
         </div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem', marginBottom: '2rem' }}>
+
+      <div className="grid-2">
         <div className="card" style={{ borderLeft: '4px solid var(--success)', background: 'linear-gradient(90deg, rgba(16,185,129,0.1) 0%, var(--bg-card) 100%)' }}>
           <h3 style={{ margin: '0 0 0.5rem 0', color: 'var(--success)', fontSize: '1rem' }}>🛡️ Pilier à maintenir (M)</h3>
           <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-main)' }}>{bestPillar.name}</div>
           <div style={{ fontSize: '2.5rem', fontWeight: 800, color: 'var(--success)' }}>{bestPillar.score}%</div>
         </div>
+
+        <div className="card">
+          <h3 style={{ margin: '0 0 1.5rem 0', fontSize: '1.1rem', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}><span>🌟</span> Top 5 des points forts (OK)</h3>
+          <ul className="top-list">
+            {topOk.length === 0 ? <p className="muted">Aucune donnée.</p> : topOk.map((item, i) => (
+              <li key={i} style={{ background: 'var(--bg-main)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '0.5rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <span style={{ fontWeight: 'bold', color: 'var(--success)' }}>Point fort #{i + 1}</span>
+                  <span className="badge ok">{item.ok} OK / {item.total} évaluations</span>
+                </div>
+                <div style={{ fontSize: '0.875rem', whiteSpace: 'normal' }}>{item.q}</div>
+              </li>
+            ))}
+          </ul>
+        </div>
+
         <div className="card" style={{ borderLeft: '4px solid var(--danger)', background: 'linear-gradient(90deg, rgba(239,68,68,0.1) 0%, var(--bg-card) 100%)' }}>
           <h3 style={{ margin: '0 0 0.5rem 0', color: 'var(--danger)', fontSize: '1rem' }}>🚨 Pilier à améliorer (M)</h3>
           <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-main)' }}>{worstPillar.name}</div>
           <div style={{ fontSize: '2.5rem', fontWeight: 800, color: 'var(--danger)' }}>{worstPillar.score}%</div>
         </div>
-      </div>
-      <div className="grid-2">
+
         <div className="card">
           <h3 style={{ margin: '0 0 1.5rem 0', fontSize: '1.1rem', color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}><span>⚠️</span> Top 5 des vrais problèmes (NOK)</h3>
           <ul className="top-list">
@@ -177,19 +214,8 @@ export default function GembaAnalyse() {
               <li key={i} style={{ background: 'var(--bg-main)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '0.5rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
                   <span style={{ fontWeight: 'bold', color: 'var(--danger)' }}>Problème #{i + 1}</span>
-                  <span className="badge bad">{item.count} NOK / {totalAudits} audits</span>
+                  <span className="badge bad">{item.nok} NOK / {item.total} évaluations</span>
                 </div>
-                <div style={{ fontSize: '0.875rem', whiteSpace: 'normal' }}>{item.q}</div>
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div className="card">
-          <h3 style={{ margin: '0 0 1.5rem 0', fontSize: '1.1rem', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}><span>🌟</span> Top 5 des points forts (OK)</h3>
-          <ul className="top-list">
-            {topOk.length === 0 ? <p className="muted">Aucune donnée.</p> : topOk.map((item, i) => (
-              <li key={i} style={{ background: 'var(--bg-main)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '0.5rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}><span style={{ fontWeight: 'bold', color: 'var(--success)' }}>Point fort #{i + 1}</span><span className="badge ok">{item.count} OK</span></div>
                 <div style={{ fontSize: '0.875rem', whiteSpace: 'normal' }}>{item.q}</div>
               </li>
             ))}

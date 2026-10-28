@@ -168,7 +168,7 @@ export default function App() {
         {/* IMPORT 5S */}
         {currentView === 'import' && (
           <div className="card">
-            {!previewMode ? (
+            {!previewMode ? ( <>
               <div className="upload-zone">
                 <div style={{ fontSize: '3rem' }}>📁</div>
                 <h2>Importer votre fichier 5S</h2>
@@ -177,6 +177,16 @@ export default function App() {
                   <input type="file" accept=".xlsx, .xls" onChange={handleFile} style={{ display: 'none' }} />
                 </label>
               </div>
+              
+              <div style={{ marginTop: '1.5rem', textAlign: 'center', borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
+                <button className="btn btn-danger" style={{ background: 'var(--danger)', color: 'white', border: 'none', padding: '0.5rem 1rem', cursor: 'pointer', width: '100%', maxWidth: '300px' }} onClick={async () => {
+                  const { error } = await supabase.from('audits').delete().neq('date', '1900-01-01');
+                  if (error) alert("Erreur : " + error.message);
+                }}>
+                  🗑️ Vider toute la base 5S
+                </button>
+              </div>
+              </>
             ) : (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h2 style={{ margin: 0 }}>Aperçu des données ({audits.length} lignes)</h2>

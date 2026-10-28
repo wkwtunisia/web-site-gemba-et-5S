@@ -71,19 +71,36 @@ export default function GembaAnalyse() {
     })
   }, [data, startDate, endDate, weekFilter])
 
-  // 🌟 FONCTION DE FILTRE POUR IGNORER LES NOMS DES PILIERS
-  const isValidProblem = (q) => {
-    if (!q) return false;
-    const clean = String(q).trim().toUpperCase();
-    // On ignore les questions qui sont juste le nom du pilier
-    const isGeneric = ['MILIEU', 'MATIÈRE', 'MATIERE', 'MÉTHODE', 'METHODE', 'MAINTENANCE', "MAIN D'OEUVRE", "MAIN D'ŒUVRE"].includes(clean);
-    return !isGeneric;
+  // 🌟 CALCUL DU NOMBRE TOTAL D'AUDITS
+  const totalAudits = useMemo(() => {
+    const uniqueAudits = new Set()
+    filteredData.forEach(row => uniqueAudits.add(`${row.date}|${row.ligne}`))
+    return uniqueAudits.size
+  }, [filteredData])
+
+  // 🌟 FILTRE MAGIQUE POUR IGNORER LES CATÉGORIES
+  const isValidProblem = (row) => {
+    if (!row.question) return false;
+    const cleanQ = String(row.question).trim().toUpperCase();
+    const cleanM = String(row.point_m || '').trim().toUpperCase();
+    
+    // Si la question est exactement le nom du pilier ou de la catégorie
+    if (cleanQ === cleanM && cleanQ !== '') return false;
+
+    // Si c'est un nom générique
+    const isGeneric = ['MILIEU', 'MATIÈRE', 'MATIERE', 'MÉTHODE', 'METHODE', 'MAINTENANCE', "MAIN D'OEUVRE", "MAIN D'ŒUVRE", 'OK DÉMARRAGE', 'OK DEMARRAGE'].includes(cleanQ);
+    if (isGeneric) return false;
+
+    // Si ça contient (OK démarrage)
+    if (cleanQ.includes('(OK DÉMARRAGE)') || cleanQ.includes('(OK DEMARRAGE)')) return false;
+    
+    return true;
   };
 
   const topNok = useMemo(() => {
     const nokCount = {}
     filteredData.forEach(row => { 
-      if (String(row.reponse).toUpperCase() === 'NOK' && isValidProblem(row.question)) {
+      if (String(row.reponse).toUpperCase() === 'NOK' && isValidProblem(row)) {
         nokCount[row.question] = (nokCount[row.question] || 0) + 1 
       }
     })
@@ -93,7 +110,7 @@ export default function GembaAnalyse() {
   const topOk = useMemo(() => {
     const okCount = {}
     filteredData.forEach(row => { 
-      if (String(row.reponse).toUpperCase() === 'OK' && isValidProblem(row.question)) {
+      if (String(row.reponse).toUpperCase() === 'OK' && isValidProblem(row)) {
         okCount[row.question] = (okCount[row.question] || 0) + 1 
       }
     })
@@ -105,15 +122,12 @@ export default function GembaAnalyse() {
     filteredData.forEach(row => {
       const rep = String(row.reponse).toUpperCase()
       if (rep === 'N/A') return
-      
       const pilier = getStandard5M(row.point_m)
       if (!pilier) return 
-
       if (!groups[pilier]) groups[pilier] = { ok: 0, total: 0 }
       groups[pilier].total++
       if (rep === 'OK') groups[pilier].ok++
     })
-    
     return Object.entries(groups).map(([name, s]) => ({ 
       name, 
       score: s.total > 0 ? Math.round((s.ok / s.total) * 100) : 0 
@@ -161,7 +175,10 @@ export default function GembaAnalyse() {
           <ul className="top-list">
             {topNok.length === 0 ? <p className="muted">Aucun problème spécifique détecté.</p> : topNok.map((item, i) => (
               <li key={i} style={{ background: 'var(--bg-main)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '0.5rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}><span style={{ fontWeight: 'bold', color: 'var(--danger)' }}>Problème #{i + 1}</span><span className="badge bad">{item.count} NOK</span></div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <span style={{ fontWeight: 'bold', color: 'var(--danger)' }}>Problème #{i + 1}</span>
+                  <span className="badge bad">{item.count} NOK / {totalAudits} audits</span>
+                </div>
                 <div style={{ fontSize: '0.875rem', whiteSpace: 'normal' }}>{item.q}</div>
               </li>
             ))}

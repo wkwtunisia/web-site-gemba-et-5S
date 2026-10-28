@@ -1,22 +1,6 @@
 import { useState, useMemo } from 'react'
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, LabelList } from 'recharts'
 
-// 🌟 NOUVELLE LOGIQUE STRICTE (Basée sur votre liste exacte)
-const getUap5S = (zone) => {
-  if (!zone) return 'UAP 2' // Si pas de zone, on met dans UAP 2 par défaut
-  const clean = zone.trim().toUpperCase().replace(/\s+/g, '') // On enlève les espaces
-
-  // 1. Logistique (tout ce qui contient MAGASIN)
-  if (clean.includes('MAGASIN') || clean.includes('STOCKAGE')) return 'Logistique'
-
-  // 2. UAP 1 (Votre liste exacte)
-  const uap1List = ['F01', 'F02', 'F83', 'F99', 'F86', 'F85', 'L77', 'L76']
-  if (uap1List.includes(clean)) return 'UAP 1'
-
-  // 3. UAP 2 (Tout le reste)
-  return 'UAP 2'
-}
-
 const getColor = (score) => score >= 86 ? '#10b981' : score >= 80 ? '#f59e0b' : '#ef4444'
 const axisStyle = { fontSize: 12, fill: '#94a3b8' }
 
@@ -24,35 +8,37 @@ const extractDateString = (dateStr) => {
   if (!dateStr) return null;
   const str = String(dateStr).trim();
   if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.substring(0, 10);
-  if (/^\d{2}\/\d{2}\/\d{4}/.test(str)) {
-    const parts = str.split('/');
-    return `${parts[2]}-${parts[1]}-${parts[0]}`;
-  }
+  if (/^\d{2}\/\d{2}\/\d{4}/.test(str)) { const parts = str.split('/'); return `${parts[2]}-${parts[1]}-${parts[0]}`; }
   const months = { jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06', jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12' };
   const match = str.match(/^(\d{1,2})[-\s]([a-zA-Z]{3})[-\s](\d{4})/);
-  if (match) {
-    const month = months[match[2].toLowerCase()];
-    if (month) return `${match[3]}-${month}-${String(match[1]).padStart(2, '0')}`;
-  }
+  if (match) { const month = months[match[2].toLowerCase()]; if (month) return `${match[3]}-${month}-${String(match[1]).padStart(2, '0')}`; }
   return null;
 }
 
-const getWeekNumber = (dateStr) => {
+const getWeekNumber = (dateStr, rawSemaine) => {
+  if (rawSemaine !== undefined && rawSemaine !== null && rawSemaine !== '') {
+    return `S${String(rawSemaine).padStart(2, '0')}`
+  }
   const dateOnly = extractDateString(dateStr);
   if (!dateOnly) return null;
   const d = new Date(`${dateOnly}T12:00:00`);
   if (isNaN(d.getTime())) return null;
-  
-  const target = new Date(d.valueOf());
-  const dayNr = (d.getDay() + 6) % 7;
-  target.setDate(target.getDate() - dayNr + 3); 
-  const firstThursday = target.valueOf();
+  const target = new Date(d.valueOf()); const dayNr = (d.getDay() + 6) % 7;
+  target.setDate(target.getDate() - dayNr + 3); const firstThursday = target.valueOf();
   target.setMonth(0, 1);
-  if (target.getDay() !== 4) {
-    target.setMonth(0, 1 + ((4 - target.getDay()) + 7) % 7);
-  }
-  const weekNum = 1 + Math.ceil((firstThursday - target) / 604800000);
-  return `S${String(weekNum).padStart(2, '0')}`;
+  if (target.getDay() !== 4) target.setMonth(0, 1 + ((4 - target.getDay()) + 7) % 7);
+  return `S${String(1 + Math.ceil((firstThursday - target) / 604800000)).padStart(2, '0')}`;
+}
+
+const getUap5S = (zone) => {
+  if (!zone) return 'UAP 2'
+  const clean = String(zone).trim().toUpperCase().replace(/\s+/g, '')
+  if (clean.includes('MAGASIN') || clean.includes('STOCKAGE') || clean === 'LOGISTIQUE') return 'Logistique'
+  if (clean === 'UAP1' || clean === 'UAP 1') return 'UAP 1'
+  if (clean === 'UAP2' || clean === 'UAP 2') return 'UAP 2'
+  const uap1List = ['F01', 'F02', 'F83', 'F99', 'F86', 'F85', 'L77', 'L76']
+  if (uap1List.includes(clean)) return 'UAP 1'
+  return 'UAP 2'
 }
 
 export default function AnalysesUap({ audits }) {
@@ -60,35 +46,79 @@ export default function AnalysesUap({ audits }) {
   const [endDate, setEndDate] = useState('')
   const [weekFilter, setWeekFilter] = useState('')
 
-  const availableWeeks = useMemo(() => {
-    const set = new Set()
-    audits.forEach(a => {
-      const w = getWeekNumber(a.date)
-      if (w) set.add(w)
+  // On normalise les données pour s'adapter à la structure de la base 5S
+  const normalizedAudits = useMemo(() => {
+    return (audits || []).map(row => {
+      // Si c'est un audit 5S avec score_pct
+      if (row.score_pct !== undefined && row.score_pct !== null) {
+        return { ...row, computedScore: Number(row.score_pct) || 0, zoneOrLigne: row.zone || row.ligne }
+      }
+      // Si c'est un audit par question (comme le Gemba)
+      const rep = String(row.reponse || '').toUpperCase()
+      let ok = rep === 'OK' ? 1 : 0
+      let total = rep !== 'N/A' ? 1 : 0
+      return { 
+        ...row, 
+        computedScore: total > 0 ? Math.round((ok / total) * 100) : 0,
+        zoneOrLigne: row.zone || row.ligne,
+        _isRowLevel: true 
+      }
     })
-    return Array.from(set).sort()
   }, [audits])
 
+  // Si les données sont ligne par ligne, on doit les regrouper par audit
+  const groupedAudits = useMemo(() => {
+    const hasRowLevel = normalizedAudits.some(a => a._isRowLevel)
+    if (!hasRowLevel) return normalizedAudits // Déjà groupé (cas score_pct)
+
+    const groups = {}
+    normalizedAudits.forEach(row => {
+      const date = extractDateString(row.date)
+      const zone = row.zoneOrLigne?.trim()
+      if (!date || !zone) return
+      const key = `${date}|${zone}`
+      if (!groups[key]) {
+        groups[key] = { date, zone, uap: row.uap, semaine: row.semaine, ok: 0, total: 0, score_pct: null }
+      }
+      const rep = String(row.reponse).toUpperCase()
+      if (rep !== 'N/A') {
+        groups[key].total++
+        if (rep === 'OK') groups[key].ok++
+      }
+    })
+    return Object.values(groups).map(g => ({
+      ...g,
+      computedScore: g.total > 0 ? Math.round((g.ok / g.total) * 100) : 0,
+      zoneOrLigne: g.zone
+    }))
+  }, [normalizedAudits])
+
+  const availableWeeks = useMemo(() => {
+    const set = new Set()
+    groupedAudits.forEach(a => { 
+      const w = getWeekNumber(a.date, a.semaine)
+      if (w) set.add(w) 
+    })
+    return Array.from(set).sort()
+  }, [groupedAudits])
+
   const filteredAudits = useMemo(() => {
-    return audits.filter(a => {
-      const dStr = extractDateString(a.date)
-      if (!dStr) return false
+    return groupedAudits.filter(a => {
+      const dStr = extractDateString(a.date); if (!dStr) return false
       if (startDate && dStr < startDate) return false
       if (endDate && dStr > endDate) return false
-      if (weekFilter && getWeekNumber(a.date) !== weekFilter) return false
+      if (weekFilter && getWeekNumber(a.date, a.semaine) !== weekFilter) return false
       return true
     })
-  }, [audits, startDate, endDate, weekFilter])
+  }, [groupedAudits, startDate, endDate, weekFilter])
 
   const kpis = useMemo(() => {
     const uaps = { 'UAP 1': [], 'UAP 2': [], 'Logistique': [], 'Usine': [] }
-
+    
     filteredAudits.forEach(a => {
-      const score = Number(a.score_pct) || 0
-      uaps['Usine'].push(score)
-
-      const uap = getUap5S(a.zone)
-      if (uaps[uap]) uaps[uap].push(score)
+      uaps['Usine'].push(a.computedScore)
+      const uapName = a.uap ? getUap5S(a.uap) : getUap5S(a.zoneOrLigne)
+      if (uaps[uapName]) uaps[uapName].push(a.computedScore)
     })
 
     const calcAvg = (arr) => arr.length === 0 ? 0 : Math.round(arr.reduce((a, b) => a + b, 0) / arr.length)
@@ -102,19 +132,10 @@ export default function AnalysesUap({ audits }) {
   }, [filteredAudits])
 
   const trendData = useMemo(() => {
-    let groupBy = 'month'
-    if (weekFilter) groupBy = 'day'
-    else if (startDate || endDate) groupBy = 'week'
-
+    let groupBy = (startDate || endDate) ? 'day' : weekFilter ? 'day' : 'month'
     const groups = {}
 
-    const sortedAudits = [...filteredAudits].sort((a, b) => {
-      const dateCompare = extractDateString(a.date).localeCompare(extractDateString(b.date))
-      if (dateCompare !== 0) return dateCompare
-      return (a.zone || '').localeCompare(b.zone || '')
-    })
-
-    sortedAudits.forEach(a => {
+    filteredAudits.forEach(a => {
       const dStr = extractDateString(a.date)
       if (!dStr) return
 
@@ -125,24 +146,21 @@ export default function AnalysesUap({ audits }) {
         key = dStr.substring(0, 7)
         label = new Date(`${key}-01T12:00:00`).toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' })
       } else if (groupBy === 'week') {
-        key = getWeekNumber(a.date)
+        key = getWeekNumber(a.date, a.semaine)
         label = key
       } else if (groupBy === 'day') {
-        key = `${dStr}_${a.zone}` 
-        const dateLabel = new Date(`${dStr}T12:00:00`).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })
-        label = `${dateLabel} (${a.zone})`
+        key = dStr
+        label = new Date(`${dStr}T12:00:00`).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })
       }
 
       if (!key) return
       if (!groups[key]) groups[key] = { key, label, uap1: [], uap2: [], logistique: [], usine: [] }
 
-      const score = Number(a.score_pct) || 0
-      groups[key].usine.push(score)
-      
-      const uapName = getUap5S(a.zone)
-      if (uapName === 'UAP 1') groups[key].uap1.push(score)
-      else if (uapName === 'UAP 2') groups[key].uap2.push(score)
-      else if (uapName === 'Logistique') groups[key].logistique.push(score)
+      groups[key].usine.push(a.computedScore)
+      const uapName = a.uap ? getUap5S(a.uap) : getUap5S(a.zoneOrLigne)
+      if (uapName === 'UAP 1') groups[key].uap1.push(a.computedScore)
+      else if (uapName === 'UAP 2') groups[key].uap2.push(a.computedScore)
+      else if (uapName === 'Logistique') groups[key].logistique.push(a.computedScore)
     })
 
     const calcAvgForArr = (arr) => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : null
@@ -169,16 +187,11 @@ export default function AnalysesUap({ audits }) {
   const CustomLabel = (props) => {
     const { x, y, value } = props
     if (value === null || value === undefined) return null
-    return (
-      <text x={x} y={y - 12} fill="#f8fafc" fontSize={11} fontWeight="bold" textAnchor="middle">
-        {value}%
-      </text>
-    )
+    return <text x={x} y={y - 12} fill="#f8fafc" fontSize={11} fontWeight="bold" textAnchor="middle">{value}%</text>
   }
 
   const GraphCard = ({ title, dataKey, color }) => {
     const hasData = trendData.some(d => d[dataKey] !== null)
-
     return (
       <div className="card" style={{ padding: '1rem' }}>
         <h3 style={{ margin: '0 0 1rem 0', fontSize: '1rem', color: color }}>{title}</h3>
@@ -191,19 +204,8 @@ export default function AnalysesUap({ audits }) {
                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
                 <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} dy={10} angle={-20} textAnchor="end" height={50} />
                 <YAxis domain={[0, 100]} tick={axisStyle} axisLine={false} tickLine={false} />
-                <Tooltip 
-                  contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8, color: '#fff' }}
-                  formatter={(v) => [`${v} %`, title]}
-                />
-                <Line 
-                  type="monotone" 
-                  dataKey={dataKey} 
-                  stroke={color} 
-                  strokeWidth={3} 
-                  dot={{ r: 5, fill: color, stroke: '#1e293b', strokeWidth: 2 }} 
-                  activeDot={{ r: 7 }} 
-                  connectNulls 
-                >
+                <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8, color: '#fff' }} formatter={(v) => [`${v} %`, title]} />
+                <Line type="monotone" dataKey={dataKey} stroke={color} strokeWidth={3} dot={{ r: 5, fill: color, stroke: '#1e293b', strokeWidth: 2 }} activeDot={{ r: 7 }} connectNulls>
                   <LabelList content={<CustomLabel />} />
                 </Line>
               </LineChart>

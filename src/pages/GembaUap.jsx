@@ -16,7 +16,10 @@ const extractDateString = (dateStr) => {
   return null;
 }
 
-const getWeekNumber = (dateStr) => {
+const getWeekNumber = (dateStr, rawSemaine) => {
+  if (rawSemaine !== undefined && rawSemaine !== null && rawSemaine !== '') {
+    return `S${String(rawSemaine).padStart(2, '0')}`
+  }
   const dateOnly = extractDateString(dateStr);
   if (!dateOnly) return null;
   const d = new Date(`${dateOnly}T12:00:00`);
@@ -48,7 +51,12 @@ export default function GembaUap() {
   useEffect(() => { fetchAllGemba().then(res => { setData(res || []); setLoading(false); }) }, [])
 
   const availableWeeks = useMemo(() => {
-    const set = new Set(); data.forEach(a => { const w = getWeekNumber(a.date); if (w) set.add(w); }); return Array.from(set).sort()
+    const set = new Set()
+    data.forEach(a => {
+      const w = getWeekNumber(a.date, a.semaine)
+      if (w) set.add(w)
+    })
+    return Array.from(set).sort()
   }, [data])
 
   const filteredData = useMemo(() => {
@@ -56,7 +64,7 @@ export default function GembaUap() {
       const dStr = extractDateString(row.date); if (!dStr) return false
       if (startDate && dStr < startDate) return false
       if (endDate && dStr > endDate) return false
-      if (weekFilter && getWeekNumber(row.date) !== weekFilter) return false
+      if (weekFilter && getWeekNumber(row.date, row.semaine) !== weekFilter) return false
       return true
     })
   }, [data, startDate, endDate, weekFilter])
@@ -64,48 +72,89 @@ export default function GembaUap() {
   const groupedAudits = useMemo(() => {
     const groups = {}
     filteredData.forEach(row => {
-      const date = extractDateString(row.date); const ligne = row.ligne?.trim(); if (!date || !ligne) return
+      const date = extractDateString(row.date)
+      const ligne = row.ligne?.trim()
+      if (!date || !ligne) return
+
       const auditKey = `${date}|${ligne}`
-      if (!groups[auditKey]) groups[auditKey] = { date, ligne, uap: (row.uap || '').trim(), ok: 0, total: 0 }
-      if (String(row.reponse).toUpperCase() !== 'N/A') {
-        groups[auditKey].total++; if (String(row.reponse).toUpperCase() === 'OK') groups[auditKey].ok++
+      if (!groups[auditKey]) {
+        groups[auditKey] = { 
+          date, ligne, 
+          uap: (row.uap || '').trim(), 
+          semaine: row.semaine,
+          ok: 0, total: 0 
+        }
+      }
+      
+      const rep = String(row.reponse).toUpperCase()
+      if (rep !== 'N/A') {
+        groups[auditKey].total++
+        if (rep === 'OK') groups[auditKey].ok++
       }
     })
-    return Object.values(groups).map(g => ({ ...g, score: g.total > 0 ? Math.round((g.ok / g.total) * 100) : 0 }))
+
+    return Object.values(groups).map(g => ({ 
+      ...g, 
+      score: g.total > 0 ? Math.round((g.ok / g.total) * 100) : 0 
+    }))
   }, [filteredData])
 
   const kpis = useMemo(() => {
     const uaps = { 'UAP 1': [], 'UAP 2': [], 'Logistique': [], 'Usine': [] }
+    
     groupedAudits.forEach(audit => {
-      const uap = audit.uap.toUpperCase()
+      const uap = String(audit.uap || '').toUpperCase().replace(/\s+/g, '')
       uaps['Usine'].push(audit.score)
-      if (uap.includes('UAP 1')) uaps['UAP 1'].push(audit.score)
-      else if (uap.includes('UAP 2')) uaps['UAP 2'].push(audit.score)
+      if (uap.includes('UAP1')) uaps['UAP 1'].push(audit.score)
+      else if (uap.includes('UAP2')) uaps['UAP 2'].push(audit.score)
       else if (uap.includes('LOG')) uaps['Logistique'].push(audit.score)
     })
+    
     const calcAvg = (arr) => arr.length === 0 ? 0 : Math.round(arr.reduce((a, b) => a + b, 0) / arr.length)
-    return { uap1: calcAvg(uaps['UAP 1']), uap2: calcAvg(uaps['UAP 2']), logistique: calcAvg(uaps['Logistique']), usine: calcAvg(uaps['Usine']) }
+    
+    return { 
+      uap1: calcAvg(uaps['UAP 1']), 
+      uap2: calcAvg(uaps['UAP 2']), 
+      logistique: calcAvg(uaps['Logistique']), 
+      usine: calcAvg(uaps['Usine']) 
+    }
   }, [groupedAudits])
 
   const trendData = useMemo(() => {
-    let groupBy = weekFilter ? 'day' : (startDate || endDate) ? 'week' : 'month'
+    let groupBy = (startDate || endDate) ? 'day' : weekFilter ? 'day' : 'month'
     const groups = {}
+    
     groupedAudits.forEach(audit => {
-      let key = groupBy === 'month' ? audit.date.substring(0, 7) : groupBy === 'week' ? getWeekNumber(audit.date) : audit.date
+      let key = ''
+      if (groupBy === 'month') key = audit.date.substring(0, 7)
+      else if (groupBy === 'week') key = getWeekNumber(audit.date, audit.semaine)
+      else key = audit.date
+      
       if (!key) return
       if (!groups[key]) groups[key] = { key, uap1: [], uap2: [], logistique: [], usine: [] }
+      
       groups[key].usine.push(audit.score)
-      const uap = audit.uap.toUpperCase()
-      if (uap.includes('UAP 1')) groups[key].uap1.push(audit.score)
-      else if (uap.includes('UAP 2')) groups[key].uap2.push(audit.score)
+      
+      const uap = String(audit.uap || '').toUpperCase().replace(/\s+/g, '')
+      if (uap.includes('UAP1')) groups[key].uap1.push(audit.score)
+      else if (uap.includes('UAP2')) groups[key].uap2.push(audit.score)
       else if (uap.includes('LOG')) groups[key].logistique.push(audit.score)
     })
+    
     const calcAvg = (arr) => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : null
+    
     return Object.values(groups).map(g => {
       let label = g.key
       if (groupBy === 'month') label = new Date(`${g.key}-01T12:00:00`).toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' })
       else if (groupBy === 'day') label = new Date(`${g.key}T12:00:00`).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })
-      return { label, key: g.key, uap1: calcAvg(g.uap1), uap2: calcAvg(g.uap2), logistique: calcAvg(g.logistique), usine: calcAvg(g.usine) }
+      
+      return { 
+        label, key: g.key, 
+        uap1: calcAvg(g.uap1), 
+        uap2: calcAvg(g.uap2), 
+        logistique: calcAvg(g.logistique), 
+        usine: calcAvg(g.usine) 
+      }
     }).sort((a, b) => String(a.key).localeCompare(String(b.key)))
   }, [groupedAudits, startDate, endDate, weekFilter])
 

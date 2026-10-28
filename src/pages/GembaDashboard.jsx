@@ -48,9 +48,6 @@ export default function GembaDashboard({ view }) {
           ok: 0, nok: 0, total_questions: 0, seenQuestions: new Set() 
         }
       }
-      const qText = String(row.question).trim().toLowerCase()
-      if (groups[auditKey].seenQuestions.has(qText)) return
-      groups[auditKey].seenQuestions.add(qText)
       
       const rep = String(row.reponse).toUpperCase()
       if (rep === 'OK') groups[auditKey].ok++

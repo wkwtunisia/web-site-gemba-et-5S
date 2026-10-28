@@ -1,4 +1,4 @@
-import GembaPiliers from './pages/GembaPiliers'
+import AnalyseRepetitive from './pages/AnalyseRepetitive'
 import GembaUap from './pages/GembaUap'
 import ResultatsS1 from './pages/ResultatsS1'
 import TvDashboard from './pages/TvDashboard'
@@ -145,6 +145,8 @@ export default function App() {
         {currentView === 'analyse_gemba' && <GembaAnalyse />}
         {currentView === 'plan_action_gemba' && <PlanActionGemba />}
         {currentView === 'pilotes_gemba' && <PilotesGemba />}
+          {currentView === 'analyse_repetitive' && <AnalyseRepetitive />}
+          {currentView === 'analyse_repetitive' && <AnalyseRepetitive />}
         {currentView === 'rapport_gemba' && <RapportGemba />}
         {currentView === 'heatmap_gemba' && <HeatmapGemba />}
 

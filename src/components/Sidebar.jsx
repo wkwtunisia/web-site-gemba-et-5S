@@ -12,6 +12,7 @@ export default function Sidebar({ currentView, setCurrentView, role, userEmail }
       <div className="sidebar-nav">
         <div className="sidebar-section">Mon Espace</div>
         <button className={`nav-item ${currentView === 'tendance_ligne' ? 'active' : ''}`} onClick={() => setCurrentView('tendance_ligne')}>📈 Tendance par Ligne</button>
+        <button className={`nav-item ${currentView === 'analyse_repetitive' ? 'active' : ''}`} onClick={() => setCurrentView('analyse_repetitive')}>🔄 Analyses répétitives</button>
         <button className={`nav-item ${currentView === 'tv' ? 'active' : ''}`} onClick={() => setCurrentView('tv')}>
           📺 Dashboard TV
         </button>

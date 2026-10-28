@@ -17,7 +17,23 @@ function toIso(v) {
   const d = new Date(v)
   return isNaN(d) ? null : d.toISOString()
 }
-const toDate = (v) => { const iso = toIso(v); return iso ? iso.slice(0, 10) : null }
+const toDate = (v) => {
+  if (v == null || v === '') return null
+  let d
+  if (v instanceof Date) {
+    d = v
+  } else if (typeof v === 'number') {
+    const ms = Math.round((v - 25569) * 86400 * 1000)
+    d = new Date(ms)
+  } else {
+    d = new Date(v)
+  }
+  if (isNaN(d.getTime())) return null
+  
+  // On corrige le décalage horaire pour garder la date locale (Tunisie)
+  const localDate = new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+  return localDate.toISOString().slice(0, 10)
+}
 
 function findHeaderRow(aoa) {
   for (let i = 0; i < Math.min(aoa.length, 10); i++) {

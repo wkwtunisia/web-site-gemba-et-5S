@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { supabase } from '../supabaseClient'
 import { parseFile } from '../services/importExcel'
 import { upsertAudits } from '../services/auditsApi'
 
@@ -44,6 +45,7 @@ export default function UploadCard({ onImported }) {
     setIsError(false)
 
     try {
+      // On utilise upsertAudits qui met à jour ou insère sans supprimer les actions/photos
       const count = await upsertAudits(rows)
       setMessage(`${count} audit(s) enregistré(s) avec succès dans Supabase.`)
       setRows([])

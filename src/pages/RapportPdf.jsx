@@ -22,6 +22,17 @@ const urlToBase64 = async (url) => {
   }
 }
 
+// 🌟 FONCTION ANTI-DÉCALAGE HORAIRE (Découpage manuel du texte)
+const formatDateFR = (dStr) => {
+  if (!dStr) return '—';
+  const str = String(dStr);
+  if (str.length >= 10 && str.includes('-')) {
+    const parts = str.substring(0, 10).split('-');
+    if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  }
+  return new Date(dStr).toLocaleDateString('fr-FR');
+}
+
 const COLORS = {
   primary: [15, 23, 42], accent: [37, 99, 235], success: [16, 185, 129], danger: [239, 68, 68], warning: [245, 158, 11], light: [248, 250, 252], border: [226, 232, 240], textMuted: [100, 116, 139]
 }
@@ -31,7 +42,7 @@ export default function RapportPdf({ audits }) {
   const [uploading, setUploading] = useState(false)
   const [actions, setActions] = useState([])
   const [photosByAction, setPhotosByAction] = useState({})
-  const [isAdmin, setIsAdmin] = useState(false) // 🌟 Détection Admin
+  const [isAdmin, setIsAdmin] = useState(false)
 
   const loadPhotos = async () => {
     const [actionsRes, photosMap] = await Promise.all([fetchActions(), fetchPhotosByAction()])
@@ -41,7 +52,6 @@ export default function RapportPdf({ audits }) {
 
   useEffect(() => {
     loadPhotos()
-    // 🌟 Vérification du rôle
     supabase.auth.getUser().then(({ data }) => {
       if (data?.user?.email) {
         supabase.from('profiles').select('role').eq('email', data.user.email).single().then(({ data: profile }) => {
@@ -52,7 +62,11 @@ export default function RapportPdf({ audits }) {
   }, [])
 
   const sortedAudits = useMemo(() => {
-    return [...audits].sort((a, b) => new Date(b.date) - new Date(a.date))
+    return [...audits].sort((a, b) => {
+      const dateA = String(a.date).substring(0, 10);
+      const dateB = String(b.date).substring(0, 10);
+      return dateB.localeCompare(dateA);
+    })
   }, [audits])
 
   const selectedAudit = useMemo(() => {
@@ -114,6 +128,7 @@ export default function RapportPdf({ audits }) {
     const nokCount = cps.filter(c => c.s === 'NOK').length
     const naCount = cps.filter(c => c.s === 'N/A').length
     const totalQuestions = cps.length
+    const displayDate = formatDateFR(selectedAudit.date);
 
     // --- PAGE 1 ---
     doc.setFillColor(...COLORS.primary); doc.rect(0, 0, pageWidth, pageHeight, 'F')
@@ -123,13 +138,13 @@ export default function RapportPdf({ audits }) {
     doc.setFontSize(24); doc.setTextColor(...COLORS.accent); doc.text("5S", pageWidth / 2, 122, { align: 'center' })
     doc.setDrawColor(...COLORS.accent); doc.setLineWidth(1); doc.line(pageWidth / 2 - 20, 130, pageWidth / 2 + 20, 130)
     doc.setFontSize(16); doc.setTextColor(200, 200, 200); doc.setFont('helvetica', 'normal'); doc.text(`Zone / Ligne : ${selectedAudit.zone}`, pageWidth / 2, 145, { align: 'center' }); doc.text(`Auditeur : ${selectedAudit.auditor || '—'}`, pageWidth / 2, 153, { align: 'center' })
-    doc.setFontSize(14); doc.text(`Date : ${new Date(selectedAudit.date).toLocaleDateString('fr-FR')}`, pageWidth / 2, 170, { align: 'center' })
+    doc.setFontSize(14); doc.text(`Date : ${displayDate}`, pageWidth / 2, 170, { align: 'center' })
     doc.setFontSize(10); doc.setTextColor(150, 150, 150); doc.text(`Document généré le ${new Date().toLocaleDateString('fr-FR')} à ${new Date().toLocaleTimeString('fr-FR')}`, pageWidth / 2, pageHeight - 20, { align: 'center' })
 
     // --- PAGE 2 ---
     doc.addPage(); doc.setFillColor(...COLORS.primary); doc.rect(0, 0, pageWidth, 25, 'F')
     doc.setFontSize(12); doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.text("SYNTHÈSE DE L'AUDIT", margin, 16)
-    doc.setFontSize(10); doc.setFont('helvetica', 'normal'); doc.text(`Zone ${selectedAudit.zone} - ${new Date(selectedAudit.date).toLocaleDateString('fr-FR')}`, pageWidth - margin, 16, { align: 'right' })
+    doc.setFontSize(10); doc.setFont('helvetica', 'normal'); doc.text(`Zone ${selectedAudit.zone} - ${displayDate}`, pageWidth - margin, 16, { align: 'right' })
     let currentY = 45
     const cardW = (contentWidth - 15) / 4; const cardH = 30
     const drawCard = (x, label, value, color) => {
@@ -230,7 +245,9 @@ export default function RapportPdf({ audits }) {
       doc.text(`WKW Tunisie - Rapport d'Audit 5S`, margin, pageHeight - 10)
       doc.text(`Page ${i} / ${pageCount}`, pageWidth - margin, pageHeight - 10, { align: 'right' })
     }
-    doc.save(`Rapport_5S_${selectedAudit.zone}_${selectedAudit.date}.pdf`)
+    
+    // 🌟 Nom du fichier avec la date corrigée
+    doc.save(`Rapport_5S_${selectedAudit.zone}_${String(selectedAudit.date).substring(0, 10)}.pdf`)
   }
 
   return (
@@ -244,7 +261,11 @@ export default function RapportPdf({ audits }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', flex: 1, minWidth: '300px' }}>
             <select className="filter-control" value={selectedAuditId} onChange={e => setSelectedAuditId(e.target.value)}>
               <option value="">-- Choisir un audit --</option>
-              {sortedAudits.map(a => (<option key={`${a.date}|${a.zone}|${a.auditor}`} value={`${a.date}|${a.zone}|${a.auditor}`}>{new Date(a.date).toLocaleDateString('fr-FR')} — {a.zone} (Auditeur: {a.auditor})</option>))}
+              {sortedAudits.map(a => (
+                <option key={`${a.date}|${a.zone}|${a.auditor}`} value={`${a.date}|${a.zone}|${a.auditor}`}>
+                  {formatDateFR(a.date)} — {a.zone} (Auditeur: {a.auditor})
+                </option>
+              ))}
             </select>
           </div>
           <button className="btn btn-primary" onClick={generatePDF} disabled={!selectedAudit || uploading} style={{ height: '42px', padding: '0 2rem' }}>
@@ -276,7 +297,6 @@ export default function RapportPdf({ audits }) {
                               {dbPhotos.map((p, pIdx) => (
                                 <div key={pIdx} style={{ position: 'relative' }}>
                                   <img src={p.url} alt={`Preuve ${pIdx + 1}`} style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px', border: '1px solid var(--primary)' }} />
-                                  {/* 🌟 Bouton supprimer uniquement pour l'admin */}
                                   {isAdmin && (
                                     <button onClick={() => handleRemovePhoto(p)} style={{ position: 'absolute', top: -5, right: -5, background: 'var(--danger)', color: 'white', border: 'none', borderRadius: '50%', width: '16px', height: '16px', cursor: 'pointer', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
                                   )}

@@ -140,6 +140,7 @@ export default function App() {
         {currentView === 'planifie_gemba' && <GembaPlanifieRealise />}
         {currentView === 'lignes_gemba' && <GembaResultatsLigne />}
         {['top3_gemba'].includes(currentView) && <GembaDashboard view={currentView} />}
+        {currentView === 'uap_gemba' && <GembaUap />}
         {currentView === 'piliers_gemba' && <GembaPiliers />}
         {currentView === 'analyse_gemba' && <GembaAnalyse />}
         {currentView === 'plan_action_gemba' && <PlanActionGemba />}

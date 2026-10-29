@@ -115,22 +115,26 @@ export default function ResultatsS1() {
     auditsGemba.forEach(a => {
       if (!isWithinDateRange(a.date)) return
       const ligne = (a.ligne || '').trim()
-      if (!gembaGroups[ligne]) gembaGroups[ligne] = { ok: 0, total: 0 }
-      gembaGroups[ligne].total++
-      if (String(a.reponse).toUpperCase() === 'OK') gembaGroups[ligne].ok++
+      const d = String(a.date).substring(5, 10).replace('-', '/') // ex: 10/28
+      const key = `${ligne} (${d})` // On ajoute la date pour différencier
+      if (!gembaGroups[key]) gembaGroups[key] = { ok: 0, total: 0 }
+      gembaGroups[key].total++
+      if (String(a.reponse).toUpperCase() === 'OK') gembaGroups[key].ok++
     })
-    return Object.entries(gembaGroups).map(([ligne, data]) => ({ name: ligne, score: Math.round((data.ok / data.total) * 100) })).sort((a, b) => b.score - a.score)
+    return Object.entries(gembaGroups).map(([key, data]) => ({ name: key, score: Math.round((data.ok / data.total) * 100) })).sort((a, b) => b.score - a.score)
   }, [auditsGemba, startDate, endDate])
 
   const dataChart5S = useMemo(() => {
     const stats5S = {}
     audits5S.forEach(a => {
       if (!isWithinDateRange(a.date) || !a.zone) return
-      if (!stats5S[a.zone]) stats5S[a.zone] = { sum: 0, count: 0 }
-      stats5S[a.zone].sum += Number(a.score_pct) || 0
-      stats5S[a.zone].count++
+      const d = String(a.date).substring(5, 10).replace('-', '/') // ex: 10/28
+      const key = `${a.zone} (${d})` // On ajoute la date pour différencier
+      if (!stats5S[key]) stats5S[key] = { sum: 0, count: 0 }
+      stats5S[key].sum += Number(a.score_pct) || 0
+      stats5S[key].count++
     })
-    return Object.entries(stats5S).map(([zone, data]) => ({ name: zone, score: Math.round(data.sum / data.count) })).sort((a, b) => b.score - a.score)
+    return Object.entries(stats5S).map(([key, data]) => ({ name: key, score: Math.round(data.sum / data.count) })).sort((a, b) => b.score - a.score)
   }, [audits5S, startDate, endDate])
 
   const scoresGlobaux = useMemo(() => {
@@ -295,11 +299,9 @@ export default function ResultatsS1() {
         <div className="card" style={{ padding: '1.5rem', textAlign: 'center', borderLeft: '8px solid #8b5cf6' }}>
           <h2 style={{ fontSize: '1rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>Gemba (Lignes / Audits)</h2>
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'baseline', gap: '0.5rem' }}>
-            <div style={{ fontSize: '2.5rem', fontWeight: 'bold', color: '#8b5cf6' }}>{kpiStats.gembaLignes}</div>
-            <div style={{ fontSize: '1.5rem', color: 'var(--text-muted)' }}>/</div>
-            <div style={{ fontSize: '2rem', fontWeight: 'bold', color: 'var(--text-main)' }}>{kpiStats.gembaAudits}</div>
+            <div style={{ fontSize: '3rem', fontWeight: 'bold', color: '#8b5cf6' }}>{kpiStats.gembaAudits}</div>
           </div>
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>lignes auditées / total</div>
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>Audits Gemba réalisés</div>
         </div>
 
         <div className="card" style={{ padding: '1.5rem', textAlign: 'center', borderLeft: '8px solid #10b981' }}>

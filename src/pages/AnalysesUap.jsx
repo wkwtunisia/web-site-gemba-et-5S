@@ -116,13 +116,17 @@ export default function AnalysesUap({ audits }) {
     const uaps = { 'UAP 1': [], 'UAP 2': [], 'Logistique': [], 'Usine': [] }
     
     filteredAudits.forEach(a => {
-      uaps['Usine'].push(a.computedScore)
       const uapName = a.uap ? getUap5S(a.uap) : getUap5S(a.zoneOrLigne)
-      if (uaps[uapName]) uaps[uapName].push(a.computedScore)
+      const pts = Number(a.total_points) || 0
+      const max = Number(a.max_points) || 0
+      const score = max > 0 ? Math.round((pts / max) * 100) : (Number(a.score_pct) || 0)
+      
+      uaps['Usine'].push(score)
+      if (uaps[uapName]) uaps[uapName].push(score)
     })
-
+    
     const calcAvg = (arr) => arr.length === 0 ? 0 : Math.round(arr.reduce((a, b) => a + b, 0) / arr.length)
-
+    
     return {
       uap1: calcAvg(uaps['UAP 1']),
       uap2: calcAvg(uaps['UAP 2']),

@@ -40,7 +40,7 @@ export default function RapportGemba() {
   const [loading, setLoading] = useState(true)
   const [selectedAuditId, setSelectedAuditId] = useState('')
   const [uploading, setUploading] = useState(false)
-  const [isAdmin, setIsAdmin] = useState(false) // 🌟 Détection Admin
+  const [isAdmin, setIsAdmin] = useState(false)
 
   const loadData = async () => {
     const [auditsRes, actionsRes, photosMap] = await Promise.all([
@@ -56,7 +56,6 @@ export default function RapportGemba() {
 
   useEffect(() => {
     loadData()
-    // 🌟 Vérification du rôle
     supabase.auth.getUser().then(({ data }) => {
       if (data?.user?.email) {
         supabase.from('profiles').select('role').eq('email', data.user.email).single().then(({ data: profile }) => {
@@ -100,12 +99,23 @@ export default function RapportGemba() {
     setUploading(true)
     let action = getActionForRow(row)
     let actionId = action?.id
+    
+    // Si l'action n'existe pas encore dans le plan d'action, on la crée avec le texte de l'Excel
     if (!actionId) {
-      const newAction = { type: 'GEMBA', audit_date: row.date, ligne: row.ligne, point_m: row.point_m, question: row.question, action_texte: row.action !== '-' ? row.action : '', progression: 0 }
+      const newAction = { 
+        type: 'GEMBA', 
+        audit_date: row.date, 
+        ligne: row.ligne, 
+        point_m: row.point_m, 
+        question: row.question, 
+        action_texte: row.action_texte || '', 
+        progression: 0 
+      }
       const savedData = await upsertAction(newAction)
       if (savedData) { actionId = savedData.id; setActions(prev => [...prev, savedData]) }
       else { alert("Erreur création action."); setUploading(false); return }
     }
+    
     const key = `${row.date}|${row.ligne}|${row.question}`
     for (const file of files) {
       const uploaded = await uploadActionPhoto(file, key)
@@ -238,7 +248,9 @@ export default function RapportGemba() {
 
     const tableData = rows.map((r, index) => {
       const dbPhotos = getDbPhotosForRow(r)
-      return [index + 1, r.point_m, r.question, r.reponse, r.action !== '-' ? r.action : '', dbPhotos.length > 0 ? `${dbPhotos.length} photo(s)` : '—']
+      // 🌟 AFFICHAGE DE L'ACTION EXCEL
+      const actionText = r.action_texte || getActionForRow(r)?.action_texte || ''
+      return [index + 1, r.point_m, r.question, r.reponse, actionText, dbPhotos.length > 0 ? `${dbPhotos.length} photo(s)` : '—']
     })
     
     autoTable(doc, {
@@ -273,11 +285,13 @@ export default function RapportGemba() {
         doc.text(splitTitle, margin + 22, yPos + 14)
         yPos += 25
 
-        if (q.action && q.action !== '-') {
+        // 🌟 ACTION EXCEL DANS LE PDF
+        const actionNok = q.action_texte || getActionForRow(q)?.action_texte
+        if (actionNok && actionNok !== '-') {
           doc.setFontSize(8); doc.setTextColor(...COLORS.warning); doc.setFont('helvetica', 'bold')
           doc.text("ACTION CORRECTIVE :", margin + 5, yPos)
           doc.setFont('helvetica', 'normal')
-          const splitAction = doc.splitTextToSize(q.action, contentWidth - 45)
+          const splitAction = doc.splitTextToSize(actionNok, contentWidth - 45)
           doc.text(splitAction, margin + 40, yPos)
           yPos += splitAction.length * 4 + 5
         }
@@ -332,22 +346,25 @@ export default function RapportGemba() {
       {selectedAudit && (
         <div className="card" style={{ marginTop: '2rem' }}>
           <h2 className="card-title">Photos (Synchronisées avec le Plan d'Action)</h2>
-          <p className="muted" style={{ marginBottom: '1rem', fontSize: '0.85rem' }}>Les photos ajoutées ici sont directement enregistrées dans le Plan d'Action Gemba.</p>
+          <p className="muted" style={{ marginBottom: '1rem', fontSize: '0.85rem' }}>Les actions affichées proviennent de votre fichier Excel.</p>
           <div className="table-wrapper">
             <table className="data-table">
               <thead>
-                <tr><th>Point M</th><th>Question</th><th>Statut</th><th>Action / Commentaire</th><th style={{ width: '300px' }}>Photos</th></tr>
+                <tr><th>Point M</th><th>Question</th><th>Statut</th><th>Action / Commentaire</th><th style={{ width: '200px' }}>Photos</th></tr>
               </thead>
               <tbody>
                 {selectedAudit.rows.map((r, i) => {
                   const isNok = String(r.reponse).toUpperCase() === 'NOK'
                   const dbPhotos = getDbPhotosForRow(r)
+                  // 🌟 AFFICHAGE DE L'ACTION EXCEL DANS LE TABLEAU HTML
+                  const actionText = r.action_texte || getActionForRow(r)?.action_texte || '—'
+                  
                   return (
                     <tr key={i} style={{ background: isNok ? 'rgba(239, 68, 68, 0.05)' : 'transparent' }}>
                       <td style={{ color: 'var(--text-muted)' }}>{r.point_m}</td>
                       <td style={{ whiteSpace: 'normal', maxWidth: '300px' }}>{r.question}</td>
                       <td><span className={`badge ${r.reponse === 'OK' ? 'ok' : r.reponse === 'NOK' ? 'bad' : ''}`}>{r.reponse}</span></td>
-                      <td style={{ whiteSpace: 'normal', maxWidth: '250px', color: 'var(--warning)' }}>{r.action}</td>
+                      <td style={{ whiteSpace: 'normal', maxWidth: '250px', color: 'var(--warning)' }}>{actionText}</td>
                       <td>
                         {isNok && (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -355,7 +372,6 @@ export default function RapportGemba() {
                               {dbPhotos.map((p, pIdx) => (
                                 <div key={pIdx} style={{ position: 'relative' }}>
                                   <img src={p.url} alt={`Preuve ${pIdx + 1}`} style={{ width: '50px', height: '50px', objectFit: 'cover', borderRadius: '4px', border: '1px solid var(--primary)' }} />
-                                  {/* 🌟 Bouton supprimer uniquement pour l'admin */}
                                   {isAdmin && (
                                     <button onClick={() => handleRemovePhoto(p)} style={{ position: 'absolute', top: -5, right: -5, background: 'var(--danger)', color: 'white', border: 'none', borderRadius: '50%', width: '16px', height: '16px', cursor: 'pointer', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
                                   )}
@@ -363,7 +379,7 @@ export default function RapportGemba() {
                               ))}
                             </div>
                             <label className="btn btn-secondary" style={{ cursor: uploading ? 'wait' : 'pointer', padding: '0.2rem 0.5rem', fontSize: '0.75rem', alignSelf: 'flex-start', opacity: uploading ? 0.5 : 1 }}>
-                              📷 Ajouter au plan d'action
+                              📷 Ajouter photo
                               <input type="file" accept="image/*" multiple disabled={uploading} onChange={(e) => handlePhotoUpload(r, e)} style={{ display: 'none' }} />
                             </label>
                           </div>

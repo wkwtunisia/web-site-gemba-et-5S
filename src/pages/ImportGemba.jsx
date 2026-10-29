@@ -1,5 +1,38 @@
 import { useState } from 'react'
 import { supabase } from '../supabaseClient'
+import * as XLSX from 'xlsx'
+
+// 🌟 FONCTION DE CONVERSION : 30/09/2026 devient 2026-09-30
+const formatDateForDb = (val) => {
+  if (!val) return null;
+  // Cas 1 : Excel renvoie un objet Date natif
+  if (val instanceof Date) {
+    const y = val.getFullYear();
+    const m = String(val.getMonth() + 1).padStart(2, '0');
+    const d = String(val.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  // Cas 2 : C'est du texte (ex: "30/09/2026")
+  const str = String(val).trim();
+  if (/^\d{2}\/\d{2}\/\d{4}/.test(str)) {
+    const parts = str.substring(0, 10).split('/');
+    // On inverse : Année - Mois - Jour
+    return `${parts[2]}-${parts[1]}-${parts[0]}`;
+  }
+  // Cas 3 : C'est déjà au bon format
+  if (/^\d{4}-\d{2}-\d{2}/.test(str)) {
+    return str.substring(0, 10);
+  }
+  return null;
+};
+
+// 🌟 FONCTION POUR TROUVER LA COLONNE EXACTE
+const getVal = (row, key) => {
+  const actualKey = Object.keys(row).find(k => 
+    k.trim().toLowerCase() === key.toLowerCase()
+  );
+  return actualKey ? row[actualKey] : null;
+};
 
 export default function ImportGemba() {
   const [rows, setRows] = useState([])
@@ -12,9 +45,6 @@ export default function ImportGemba() {
     setBusy(true)
     setMessage('')
     try {
-      // Note: Assurez-vous que parseGembaFile est bien importé si vous l'utilisez
-      // Sinon, adaptez selon votre logique de lecture Excel
-      const XLSX = await import('xlsx')
       const buf = await file.arrayBuffer()
       const wb = XLSX.read(buf, { type: 'array', cellDates: true })
       const ws = wb.Sheets[wb.SheetNames[0]]
@@ -22,20 +52,30 @@ export default function ImportGemba() {
       
       if (data.length === 0) throw new Error('Fichier vide')
       
-      // On normalise les données pour éviter les problèmes de casse
-      const parsed = data.map(row => ({
-        date: row['Date'] ? String(row['Date']).substring(0, 10) : null,
-        ligne: row['Ligne'],
-        uap: row['UAP'],
-        semaine: row['Semaine'],
-        point_m: row['Point M'],
-        question: row['Question'],
-        reponse: String(row['Reponse'] || '').toUpperCase().trim(),
-        auditeur: row['Auditeur']
-      })).filter(r => r.date && r.ligne && r.question)
+      const parsed = data.map(row => {
+        const dateStr = formatDateForDb(getVal(row, 'Date'));
+        const actionText = getVal(row, 'Action Corrective') || getVal(row, 'Action corrective') || getVal(row, 'Action');
+        
+        return {
+          date: dateStr,
+          ligne: getVal(row, 'Ligne'),
+          uap: getVal(row, 'UAP'),
+          semaine: getVal(row, 'Semaine'),
+          point_m: getVal(row, 'Point M'),
+          question: getVal(row, 'Question'),
+          reponse: String(getVal(row, 'Réponse') || getVal(row, 'Reponse') || '').toUpperCase().trim(),
+          auditeur: getVal(row, 'Auditeur'),
+          action_texte: actionText,
+          pilote: getVal(row, 'Pilote'),
+          date_action: formatDateForDb(getVal(row, 'Date Action'))
+        };
+      }).filter(r => r.date && r.ligne && r.question)
+
+      // Affichage de test pour vérifier la conversion
+      console.log("Première ligne convertie :", parsed[0]);
 
       setRows(parsed)
-      setMessage(`✅ ${parsed.length} lignes prêtes à être importées.`)
+      setMessage(`✅ ${parsed.length} lignes lues avec succès. Cliquez sur Enregistrer.`)
     } catch (err) {
       setMessage(`❌ Erreur : ${err.message}`)
     } finally {
@@ -46,23 +86,23 @@ export default function ImportGemba() {
 
   async function handleSave() {
     if (rows.length === 0) return
-    setBusy(true); setMessage('Enregistrement...')
+    setBusy(true); setMessage('Enregistrement dans Supabase...')
+    
     try {
-      // 🌟 DÉDUPLICATION AVANT L'INSERTION
-      const seen = new Set()
-      const uniqueRows = []
+      const seen = new Set();
+      const uniqueRows = [];
       rows.forEach(r => {
-        const key = `${r.date}|${r.ligne}|${r.question}`
+        const key = `${r.date}|${r.ligne}|${r.question}`;
         if (!seen.has(key)) {
-          seen.add(key)
-          uniqueRows.push(r)
+          seen.add(key);
+          uniqueRows.push(r);
         }
-      })
+      });
 
       const { error } = await supabase.from('gemba_audits').upsert(uniqueRows, { onConflict: 'date, ligne, question' })
       if (error) throw error
       
-      setMessage(`✅ ${uniqueRows.length} lignes enregistrées (${rows.length - uniqueRows.length} doublons ignorés) !`)
+      setMessage(`✅ ${uniqueRows.length} lignes enregistrées avec succès !`)
       setRows([])
     } catch (err) {
       setMessage('❌ Erreur : ' + err.message)
@@ -120,7 +160,7 @@ export default function ImportGemba() {
               </button>
             </div>
           </div>
-          {/* Tableau d'aperçu simplifié */}
+          <p className="muted">Les dates <strong>30/09/2026</strong> sont automatiquement converties en <strong>2026-09-30</strong> pour la base de données.</p>
         </div>
       )}
     </div>

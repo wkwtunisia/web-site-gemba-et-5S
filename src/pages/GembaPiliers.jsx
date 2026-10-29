@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../supabaseClient'
+import { fetchAllGembaData } from '../services/gembaApi'
 import { 
   Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, 
   BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell, LabelList 
@@ -44,18 +45,7 @@ const getStandard5M = (point_m) => {
   return 'Autres'
 }
 
-const fetchAllGemba = async () => {
-  let allData = []
-  let from = 0
-  const step = 1000
-  let hasMore = true
-  while (hasMore) {
-    const { data, error } = await supabase.from('gemba_audits').select('*').order('date', { ascending: false }).range(from, from + step - 1)
-    if (error) { console.error(error); break }
-    if (data.length === 0) { hasMore = false } else { allData = [...allData, ...data]; from += step }
-  }
-  return allData
-}
+const fetchAllGemba = fetchAllGembaData;
 
 export default function GembaPiliers() {
   const [data, setData] = useState([])

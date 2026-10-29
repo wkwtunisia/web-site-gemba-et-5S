@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { supabase } from '../supabaseClient'
+import { fetchAllGembaData } from '../services/gembaApi'
 import { 
   ResponsiveContainer, BarChart, Bar, Cell, XAxis, YAxis, Tooltip, CartesianGrid, LabelList,
   RadarChart, PolarGrid, PolarAngleAxis, Radar,
@@ -16,13 +16,15 @@ export default function GembaDashboard({ view }) {
   const [weekFilter, setWeekFilter] = useState('')
 
   useEffect(() => {
-    supabase.from('gemba_audits').select('*').order('date', { ascending: true }).then(({ data, error }) => {
-      if (!error) setData(data || [])
+    // 🌟 Récupération des vraies données + scores manuels
+    fetchAllGembaData().then(res => {
+      setData(res || [])
       setLoading(false)
     })
   }, [])
 
-  const getMonthKey = (dateStr) => dateStr ? dateStr.slice(0, 7) : null
+  const getMonthKey = (dateStr) => dateStr ? String(dateStr).substring(0, 7) : null
+  
   const months = useMemo(() => [...new Set(data.map(d => getMonthKey(d.date)).filter(Boolean))].sort().reverse(), [data])
   
   const weeks = useMemo(() => {
@@ -45,33 +47,49 @@ export default function GembaDashboard({ view }) {
       if (!groups[auditKey]) {
         groups[auditKey] = { 
           date: row.date, ligne: row.ligne, uap: row.uap, 
-          ok: 0, nok: 0, total_questions: 0, seenQuestions: new Set() 
+          ok: 0, nok: 0, total_questions: 0, seenQuestions: new Set(),
+          isManual: row.is_manual, manualScore: row.is_manual ? Number(row.score_pct) : 0
         }
       }
+      if (row.is_manual) return; // 🌟 On ignore le traitement des questions pour les saisies manuelles
+
+      const qText = String(row.question).trim().toLowerCase()
+      if (groups[auditKey].seenQuestions.has(qText)) return
+      groups[auditKey].seenQuestions.add(qText)
       
       const rep = String(row.reponse).toUpperCase()
       if (rep === 'OK') groups[auditKey].ok++
       if (rep === 'NOK') groups[auditKey].nok++
       if (rep !== 'N/A') groups[auditKey].total_questions++
     })
+    
     return Object.values(groups).map(a => ({
       ...a,
-      score: a.total_questions > 0 ? Math.round((a.ok / a.total_questions) * 100) : 0
+      score: a.isManual ? a.manualScore : (a.total_questions > 0 ? Math.round((a.ok / a.total_questions) * 100) : 0)
     }))
   }, [filteredData])
 
   const uapStats = useMemo(() => {
     const stats = {
-      'UAP 1': { sum: 0, count: 0 }, 'UAP 2': { sum: 0, count: 0 },
-      'LOGISTIQUE': { sum: 0, count: 0 }, 'USINE': { sum: 0, count: 0 }
+      'UAP 1': { sum: 0, count: 0 }, 
+      'UAP 2': { sum: 0, count: 0 },
+      'LOGISTIQUE': { sum: 0, count: 0 }, 
+      'USINE': { sum: 0, count: 0 }
     }
+    
     auditsGrouped.forEach(audit => {
       if (!audit.uap) return
-      const uapName = audit.uap.toUpperCase()
-      if (stats[uapName]) { stats[uapName].sum += audit.score; stats[uapName].count++ }
+      const uapName = audit.uap.toUpperCase().replace(/\s+/g, '')
+      
+      if (uapName.includes('UAP1') && stats['UAP 1']) { stats['UAP 1'].sum += audit.score; stats['UAP 1'].count++ }
+      if (uapName.includes('UAP2') && stats['UAP 2']) { stats['UAP 2'].sum += audit.score; stats['UAP 2'].count++ }
+      if (uapName.includes('LOG') && stats['LOGISTIQUE']) { stats['LOGISTIQUE'].sum += audit.score; stats['LOGISTIQUE'].count++ }
+      
       stats['USINE'].sum += audit.score; stats['USINE'].count++
     })
+    
     const format = (name) => stats[name].count > 0 ? Math.round(stats[name].sum / stats[name].count) : 0
+    
     return [
       { uap: 'UAP 1', score: format('UAP 1') }, { uap: 'UAP 2', score: format('UAP 2') },
       { uap: 'Logistique', score: format('LOGISTIQUE') }, { uap: 'Usine (Global)', score: format('USINE') }
@@ -81,21 +99,24 @@ export default function GembaDashboard({ view }) {
   const trendData = useMemo(() => {
     const monthsMap = {}
     auditsGrouped.forEach(audit => {
-      const monthKey = audit.date.slice(0, 7)
+      const monthKey = audit.date.substring(0, 7)
       if (!monthsMap[monthKey]) {
         monthsMap[monthKey] = {
-          month: monthKey, label: new Date(monthKey + '-01').toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' }),
+          month: monthKey, label: new Date(monthKey + '-01T12:00:00').toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' }),
           uap1: { sum: 0, count: 0 }, uap2: { sum: 0, count: 0 },
           logistique: { sum: 0, count: 0 }, usine: { sum: 0, count: 0 }
         }
       }
-      const uapName = audit.uap ? audit.uap.toUpperCase() : ''
+      const uapName = audit.uap ? audit.uap.toUpperCase().replace(/\s+/g, '') : ''
       const m = monthsMap[monthKey]
-      if (uapName === 'UAP 1') { m.uap1.sum += audit.score; m.uap1.count++ }
-      else if (uapName === 'UAP 2') { m.uap2.sum += audit.score; m.uap2.count++ }
-      else if (uapName === 'LOGISTIQUE') { m.logistique.sum += audit.score; m.logistique.count++ }
+      
+      if (uapName.includes('UAP1')) { m.uap1.sum += audit.score; m.uap1.count++ }
+      else if (uapName.includes('UAP2')) { m.uap2.sum += audit.score; m.uap2.count++ }
+      else if (uapName.includes('LOG')) { m.logistique.sum += audit.score; m.logistique.count++ }
+      
       m.usine.sum += audit.score; m.usine.count++
     })
+    
     return Object.values(monthsMap).map(m => ({
       label: m.label,
       uap1: m.uap1.count > 0 ? Math.round(m.uap1.sum / m.uap1.count) : null,
@@ -119,7 +140,7 @@ export default function GembaDashboard({ view }) {
   const mStats = useMemo(() => {
     const groups = {}
     filteredData.forEach(row => {
-      if (!row.point_m) return
+      if (row.is_manual || !row.point_m) return
       const rep = String(row.reponse).toUpperCase()
       if (rep === 'N/A') return 
       if (!groups[row.point_m]) groups[row.point_m] = { ok: 0, total: 0 }
@@ -170,7 +191,7 @@ export default function GembaDashboard({ view }) {
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1.5rem' }}>
             {['UAP 1', 'UAP 2', 'Logistique', 'Usine'].map((name, idx) => {
-              const key = name.toLowerCase().replace(' ', '')
+              const key = name.toLowerCase().replace(/\s+/g, '')
               const colors = ['#3b82f6', '#f97316', '#10b981', '#8b5cf6']
               return (
                 <div key={name} className="card">
@@ -217,16 +238,13 @@ export default function GembaDashboard({ view }) {
       {view === 'top3_gemba' && (
         <div>
           <div className="card" style={{ background: 'rgba(59, 130, 246, 0.1)', borderLeft: '4px solid #3b82f6', marginBottom: '2rem', padding: '1rem 1.5rem' }}>
-            <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '0.9rem', color: '#3b82f6', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              ℹ️ Comment sont calculés ces classements ?
-            </h3>
+            <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '0.9rem', color: '#3b82f6', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>ℹ️ Comment sont calculés ces classements ?</h3>
             <ul style={{ margin: 0, paddingLeft: '1.2rem', fontSize: '0.85rem', color: 'var(--text-main)', lineHeight: 1.6 }}>
               <li><strong>Moyenne par ligne :</strong> Le score affiché est la moyenne de tous les audits réalisés sur cette ligne.</li>
               <li><strong>Calcul des points :</strong> Les réponses "OK" valent 1 point, les "NOK" valent 0. Les "N/A" sont ignorés.</li>
               <li><strong>Top & Bottom 3 :</strong> Toutes les lignes auditées sont triées de la meilleure moyenne à la moins bonne. Le Top 3 prend les 3 premières, le Bottom 3 prend les 3 dernières.</li>
             </ul>
           </div>
-
           <div className="grid-2">
             <div className="card" style={{ borderTop: '4px solid var(--success)' }}>
               <h3 className="card-title" style={{ color: 'var(--success)' }}>🏆 Top 3 Lignes Gemba</h3>
@@ -256,7 +274,6 @@ export default function GembaDashboard({ view }) {
 
       {view === 'piliers_gemba' && (
         <div className="grid-2">
-          {/* RADAR CHART */}
           <div className="card">
             <h2 className="card-title" style={{ textAlign: 'center' }}>Radar des 5M</h2>
             <div style={{ height: 350 }}>
@@ -270,8 +287,6 @@ export default function GembaDashboard({ view }) {
               </ResponsiveContainer>
             </div>
           </div>
-
-          {/* BAR CHART */}
           <div className="card">
             <h2 className="card-title" style={{ textAlign: 'center' }}>Détail par Pilier (Barres)</h2>
             <div style={{ height: 350, marginTop: '2rem' }}>
@@ -280,11 +295,7 @@ export default function GembaDashboard({ view }) {
                   <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#334155" />
                   <XAxis type="number" domain={[0, 100]} tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
                   <YAxis type="category" dataKey="subject" tick={{ fill: '#f8fafc', fontSize: 12, fontWeight: 600 }} axisLine={false} tickLine={false} width={130} />
-                  <Tooltip 
-                    cursor={{ fill: 'rgba(255,255,255,0.05)' }}
-                    contentStyle={{ background: '#1e293b', border: 'none', borderRadius: 8, color: '#fff' }} 
-                    formatter={(v) => [`${v} %`, 'Score']} 
-                  />
+                  <Tooltip cursor={{ fill: 'rgba(255,255,255,0.05)' }} contentStyle={{ background: '#1e293b', border: 'none', borderRadius: 8, color: '#fff' }} formatter={(v) => [`${v} %`, 'Score']} />
                   <Bar dataKey="score" radius={[0, 6, 6, 0]} barSize={30}>
                     {mStats.map((entry, index) => <Cell key={index} fill={getScoreColor(entry.score)} />)}
                     <LabelList dataKey="score" position="right" fill="#f8fafc" formatter={(v) => `${v}%`} fontSize={13} fontWeight="bold" />

@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../supabaseClient'
+import { fetchAllGembaData } from '../services/gembaApi'
 
 const extractDateString = (dateStr) => {
   if (!dateStr) return null;

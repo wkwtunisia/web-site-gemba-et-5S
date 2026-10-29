@@ -52,6 +52,7 @@ export default function Sidebar({ currentView, setCurrentView, role, userEmail }
         {role === 'admin' && (
           <>
             <button className={`nav-item ${currentView === 'import_gemba' ? 'active' : ''}`} onClick={() => setCurrentView('import_gemba')}>🏭 Importation Gemba</button>
+            <button className={`nav-item ${currentView === 'saisie_gemba' ? 'active' : ''}`} onClick={() => setCurrentView('saisie_gemba')}>📝 Saisie Manuelle</button>
             <button className={`nav-item ${currentView === 'plan_action_gemba' ? 'active' : ''}`} onClick={() => setCurrentView('plan_action_gemba')}>📋 Plan d'Action Gemba</button>
             <button className={`nav-item ${currentView === 'pilotes_gemba' ? 'active' : ''}`} onClick={() => setCurrentView('pilotes_gemba')}>👤 Suivi par Pilote</button>
           </>

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { supabase } from '../supabaseClient'
+import { fetchAllGembaData } from '../services/gembaApi'
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, LabelList } from 'recharts'
 
 const getColor = (score) => score >= 90 ? '#10b981' : score >= 85 ? '#f59e0b' : '#ef4444'
@@ -31,16 +31,6 @@ const getWeekNumber = (dateStr, rawSemaine) => {
   return `S${String(1 + Math.ceil((firstThursday - target) / 604800000)).padStart(2, '0')}`;
 }
 
-const fetchAllGemba = async () => {
-  let allData = []; let from = 0; const step = 1000; let hasMore = true
-  while (hasMore) {
-    const { data, error } = await supabase.from('gemba_audits').select('*').order('date', { ascending: false }).range(from, from + step - 1)
-    if (error) { console.error(error); break }
-    if (data.length === 0) { hasMore = false } else { allData = [...allData, ...data]; from += step }
-  }
-  return allData
-}
-
 export default function GembaUap() {
   const [data, setData] = useState([])
   const [loading, setLoading] = useState(true)
@@ -48,7 +38,13 @@ export default function GembaUap() {
   const [endDate, setEndDate] = useState('')
   const [weekFilter, setWeekFilter] = useState('')
 
-  useEffect(() => { fetchAllGemba().then(res => { setData(res || []); setLoading(false); }) }, [])
+  useEffect(() => { 
+    fetchAllGembaData().then(res => { 
+      console.log("[GembaUap] Données reçues :", res.length)
+      setData(res || []); 
+      setLoading(false); 
+    }) 
+  }, [])
 
   const availableWeeks = useMemo(() => {
     const set = new Set()
@@ -76,26 +72,32 @@ export default function GembaUap() {
       const ligne = row.ligne?.trim()
       if (!date || !ligne) return
 
-      const auditKey = `${date}|${ligne}`
+      const isManual = row.is_manual
+      const auditKey = isManual ? `manual|${row.date}|${row.ligne}|${Math.random()}` : `${date}|${ligne}`
+
       if (!groups[auditKey]) {
         groups[auditKey] = { 
           date, ligne, 
           uap: (row.uap || '').trim(), 
           semaine: row.semaine,
-          ok: 0, total: 0 
+          ok: 0, total: 0,
+          isManual,
+          manualScore: isManual ? Number(row.score_pct) : 0
         }
       }
       
-      const rep = String(row.reponse).toUpperCase()
-      if (rep !== 'N/A') {
-        groups[auditKey].total++
-        if (rep === 'OK') groups[auditKey].ok++
+      if (!isManual) {
+        const rep = String(row.reponse).toUpperCase()
+        if (rep !== 'N/A') {
+          groups[auditKey].total++
+          if (rep === 'OK') groups[auditKey].ok++
+        }
       }
     })
 
     return Object.values(groups).map(g => ({ 
       ...g, 
-      score: g.total > 0 ? Math.round((g.ok / g.total) * 100) : 0 
+      score: g.isManual ? g.manualScore : (g.total > 0 ? Math.round((g.ok / g.total) * 100) : 0) 
     }))
   }, [filteredData])
 

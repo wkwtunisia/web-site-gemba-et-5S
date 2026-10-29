@@ -78,9 +78,27 @@ export default function ResultatsS1() {
   const [endDate, setEndDate] = useState('')
 
   useEffect(() => {
-    Promise.all([fetchAll('audits'), fetchAll('gemba_audits')]).then(([res5S, resGemba]) => {
+    Promise.all([
+      fetchAll('audits'), 
+      fetchAll('gemba_audits'),
+      supabase.from('gemba_manual_scores').select('*')
+    ]).then(([res5S, resGemba, resManual]) => {
       setAudits5S(res5S || [])
-      setAuditsGemba(resGemba || [])
+      const realAudits = resGemba || [];
+      const existingAudits = new Set();
+      realAudits.forEach(a => {
+        const d = String(a.date).substring(0, 10);
+        if (d && a.ligne) existingAudits.add(`${d}|${a.ligne.trim()}`);
+      });
+
+      const mappedManual = (resManual?.data || [])
+        .filter(m => !existingAudits.has(`${m.date}|${m.ligne.trim()}`)) // 🌟 DÉDUPLICATION
+        .map(m => ({
+          date: m.date, ligne: m.ligne, uap: m.uap, question: 'MANUEL', reponse: 'OK',
+          is_manual: true, score_pct: m.score_pct
+        }));
+        
+      setAuditsGemba([...realAudits, ...mappedManual]);
       setLoading(false)
     })
   }, [])

@@ -1,3 +1,4 @@
+import SaisieManuelleGemba from './pages/SaisieManuelleGemba'
 import GembaPiliers from './pages/GembaPiliers'
 import AnalyseRepetitive from './pages/AnalyseRepetitive'
 import GembaUap from './pages/GembaUap'
@@ -148,6 +149,7 @@ export default function App() {
         {currentView === 'pilotes_gemba' && <PilotesGemba />}
           {currentView === 'analyse_repetitive' && <AnalyseRepetitive />}
           {currentView === 'analyse_repetitive' && <AnalyseRepetitive />}
+          {currentView === 'saisie_gemba' && <SaisieManuelleGemba />}
         {currentView === 'rapport_gemba' && <RapportGemba />}
         {currentView === 'heatmap_gemba' && <HeatmapGemba />}
 

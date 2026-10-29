@@ -39,18 +39,8 @@ const getWeekNumber = (dateStr) => {
 
 const getColorGemba = (score) => score >= 90 ? '#10b981' : score >= 85 ? '#f59e0b' : '#ef4444'
 
-const fetchAllGemba = async () => {
-  let allData = []
-  let from = 0
-  const step = 1000
-  let hasMore = true
-  while (hasMore) {
-    const { data, error } = await supabase.from('gemba_audits').select('*').order('date', { ascending: false }).range(from, from + step - 1)
-    if (error) { console.error(error); break }
-    if (data.length === 0) { hasMore = false } else { allData = [...allData, ...data]; from += step }
-  }
-  return allData
-}
+import { fetchAllGembaData } from '../services/gembaApi'
+const fetchAllGemba = fetchAllGembaData;
 
 export default function GembaResultatsLigne() {
   const [data, setData] = useState([])
@@ -90,6 +80,13 @@ export default function GembaResultatsLigne() {
   const lineScores = useMemo(() => {
     const auditGroups = {}
     filteredData.forEach(row => {
+      if (row.is_manual) {
+        const key = row.ligne;
+        if (!groups[key]) groups[key] = { ok: 0, total: 0 };
+        groups[key].ok += row.score_pct;
+        groups[key].total += 100;
+        return;
+      }
       const date = extractDateString(row.date)
       const ligne = row.ligne?.trim()
       if (!date || !ligne) return

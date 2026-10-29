@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../supabaseClient'
+import { fetchAllGembaData } from '../services/gembaApi'
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, LabelList, Legend } from 'recharts'
 
 const OBJECTIF_SEMAINE = 5
@@ -45,18 +46,7 @@ const getWeekNum = (dateStr) => {
   return 1 + Math.ceil((firstThursday - target) / 604800000);
 }
 
-const fetchAllGemba = async () => {
-  let allData = []
-  let from = 0
-  const step = 1000
-  let hasMore = true
-  while (hasMore) {
-    const { data, error } = await supabase.from('gemba_audits').select('*').order('date', { ascending: false }).range(from, from + step - 1)
-    if (error) { console.error(error); break }
-    if (data.length === 0) { hasMore = false } else { allData = [...allData, ...data]; from += step }
-  }
-  return allData
-}
+const fetchAllGemba = fetchAllGembaData;
 
 export default function GembaPlanifieRealise() {
   const [data, setData] = useState([])

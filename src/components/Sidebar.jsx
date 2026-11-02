@@ -11,24 +11,15 @@ export default function Sidebar({ currentView, setCurrentView, role, userEmail }
       
       <div className="sidebar-nav">
         <div className="sidebar-section">Mon Espace</div>
+        <button className={`nav-item ${currentView === 'courbes_mensuelles' ? 'active' : ''}`} onClick={() => setCurrentView('courbes_mensuelles')}>📈 Courbes Mensuelles</button>
         <button className={`nav-item ${currentView === 'tendance_ligne' ? 'active' : ''}`} onClick={() => setCurrentView('tendance_ligne')}>📈 Tendance par Ligne</button>
         <button className={`nav-item ${currentView === 'analyse_repetitive' ? 'active' : ''}`} onClick={() => setCurrentView('analyse_repetitive')}>🔄 Analyses répétitives</button>
-        <button className={`nav-item ${currentView === 'tv' ? 'active' : ''}`} onClick={() => setCurrentView('tv')}>
-          📺 Dashboard TV
-        </button>
-        <button className={`nav-item ${currentView === 'resultats_s1' ? 'active' : ''}`} onClick={() => setCurrentView('resultats_s1')}>
-          📅 Résultats S-1
-        </button>
-        <button className={`nav-item ${currentView === 'mes_actions' ? 'active' : ''}`} onClick={() => setCurrentView('mes_actions')}>
-          📌 Mes Actions
-        </button>
-        <button className={`nav-item ${currentView === 'historique' ? 'active' : ''}`} onClick={() => setCurrentView('historique')}>
-          📜 {role === 'admin' ? 'Historique Global' : 'Mon Historique'}
-        </button>
+        <button className={`nav-item ${currentView === 'tv' ? 'active' : ''}`} onClick={() => setCurrentView('tv')}>📺 Dashboard TV</button>
+        <button className={`nav-item ${currentView === 'resultats_s1' ? 'active' : ''}`} onClick={() => setCurrentView('resultats_s1')}>📅 Résultats S-1</button>
+        <button className={`nav-item ${currentView === 'mes_actions' ? 'active' : ''}`} onClick={() => setCurrentView('mes_actions')}>📌 Mes Actions</button>
+        <button className={`nav-item ${currentView === 'historique' ? 'active' : ''}`} onClick={() => setCurrentView('historique')}>📜 {role === 'admin' ? 'Historique Global' : 'Mon Historique'}</button>
         {role === 'admin' && (
-          <button className={`nav-item ${currentView === 'parametres' ? 'active' : ''}`} onClick={() => setCurrentView('parametres')}>
-            ⚙️ Paramètres
-          </button>
+          <button className={`nav-item ${currentView === 'parametres' ? 'active' : ''}`} onClick={() => setCurrentView('parametres')}>⚙️ Paramètres</button>
         )}
 
         <div className="sidebar-section" style={{ marginTop: '1rem' }}>5S</div>

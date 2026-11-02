@@ -1,3 +1,4 @@
+import { getGembaGroupedData, get5SGroupedData, calculerMoyennesUAPGemba, calculerMoyennesUAP5S } from '../utils/stats'
 import { useState, useEffect, useMemo } from 'react'
 import { fetchAllGembaData } from '../services/gembaApi'
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, LabelList } from 'recharts'
@@ -42,10 +43,7 @@ export default function GembaUap() {
 
   const availableWeeks = useMemo(() => {
     const set = new Set()
-    data.forEach(a => {
-      const w = getWeekNumber(a.date, a.semaine)
-      if (w) set.add(w)
-    })
+    data.forEach(a => { const w = getWeekNumber(a.date, a.semaine); if (w) set.add(w) })
     return Array.from(set).sort()
   }, [data])
 
@@ -59,70 +57,21 @@ export default function GembaUap() {
     })
   }, [data, startDate, endDate, weekFilter])
 
-  const groupedAudits = useMemo(() => {
-    const groups = {}
-    filteredData.forEach(row => {
-      const date = extractDateString(row.date)
-      const ligne = row.ligne?.trim()
-      if (!date || !ligne) return
+  const groupedAudits = useMemo(() => getGembaGroupedData(filteredData), [filteredData])
 
-      const isManual = row.is_manual
-      const auditKey = isManual ? `manual|${row.date}|${row.ligne}|${Math.random()}` : `${date}|${ligne}`
-
-      if (!groups[auditKey]) {
-        groups[auditKey] = { date, ligne, uap: (row.uap || '').trim(), semaine: row.semaine, ok: 0, total: 0, isManual, manualScore: isManual ? Math.round(Number(row.score_pct)) : 0 }
-      }
-      
-      if (!isManual) {
-        const rep = String(row.reponse).toUpperCase()
-        if (rep !== 'N/A') { groups[auditKey].total++; if (rep === 'OK') groups[auditKey].ok++ }
-      }
-    })
-
-    return Object.values(groups).map(g => ({ 
-      ...g, score: g.isManual ? g.manualScore : (g.total > 0 ? Math.round((g.ok / g.total) * 100) : 0) 
-    }))
-  }, [filteredData])
-
-  const kpis = useMemo(() => {
-    const lineGroups = {}
-    
-    // 1. Moyenne par LIGNE d'abord
-    groupedAudits.forEach(a => {
-      const ligne = a.ligne
-      if (!lineGroups[ligne]) {
-        let uapName = 'UAP 2'
-        const uapClean = String(a.uap || '').toUpperCase().replace(/\s+/g, '')
-        if (uapClean.includes('UAP1')) uapName = 'UAP 1'
-        else if (uapClean.includes('LOG')) uapName = 'Logistique'
-        lineGroups[ligne] = { uapName, scores: [] }
-      }
-      lineGroups[ligne].scores.push(a.score)
-    })
-
-    // 2. On regroupe les moyennes par UAP
-    const uaps = { 'UAP 1': [], 'UAP 2': [], 'Logistique': [] }
-    Object.values(lineGroups).forEach(group => {
-      const avg = Math.round(group.scores.reduce((a,b)=>a+b, 0) / group.scores.length)
-      if (uaps[group.uapName]) uaps[group.uapName].push(avg)
-    })
-
-    // 3. Moyenne finale par UAP
-    const calcAvg = (arr) => arr.length === 0 ? 0 : Math.round(arr.reduce((a, b) => a + b, 0) / arr.length)
-    const val1 = calcAvg(uaps['UAP 1'])
-    const val2 = calcAvg(uaps['UAP 2'])
-    const val3 = calcAvg(uaps['Logistique'])
-
-    const activeUaps = [val1, val2, val3].filter(v => v > 0);
-    const usineAvg = activeUaps.length > 0 ? Math.round(activeUaps.reduce((a, b) => a + b, 0) / activeUaps.length) : 0;
-
-    return { uap1: val1, uap2: val2, logistique: val3, usine: usineAvg }
-  }, [groupedAudits])
+  // 🌟 ON PASSE filteredData (données brutes) pour que le calcul fonctionne
+  const kpisRaw = useMemo(() => calculerMoyennesUAPGemba(groupedAudits), [groupedAudits])
+  
+  const kpis = {
+    uap1: kpisRaw.uap1 || 0,
+    uap2: kpisRaw.uap2 || 0,
+    logistique: kpisRaw.logistique || 0,
+    usine: kpisRaw.usine || 0
+  }
 
   const trendData = useMemo(() => {
     let groupBy = (startDate || endDate) ? 'day' : weekFilter ? 'day' : 'month'
     const groups = {}
-    
     groupedAudits.forEach(audit => {
       let key = groupBy === 'month' ? audit.date.substring(0, 7) : groupBy === 'week' ? getWeekNumber(audit.date, audit.semaine) : audit.date
       if (!key) return
@@ -136,7 +85,6 @@ export default function GembaUap() {
     })
     
     const calcAvg = (arr) => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : null
-    
     return Object.values(groups).map(g => {
       let label = g.key
       if (groupBy === 'month') label = new Date(`${g.key}-01T12:00:00`).toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' })

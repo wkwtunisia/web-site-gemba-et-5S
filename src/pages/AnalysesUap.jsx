@@ -1,3 +1,4 @@
+import { getGembaGroupedData, get5SGroupedData, calculerMoyennesUAPGemba, calculerMoyennesUAP5S } from '../utils/stats'
 import { useState, useMemo } from 'react'
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, LabelList } from 'recharts'
 
@@ -63,31 +64,7 @@ export default function AnalysesUap({ audits }) {
     })
   }, [audits])
 
-  const groupedAudits = useMemo(() => {
-    const hasRowLevel = normalizedAudits.some(a => a._isRowLevel)
-    if (!hasRowLevel) return normalizedAudits
-
-    const groups = {}
-    normalizedAudits.forEach(row => {
-      const date = extractDateString(row.date)
-      const zone = row.zoneOrLigne?.trim()
-      if (!date || !zone) return
-      const key = `${date}|${zone}`
-      if (!groups[key]) {
-        groups[key] = { date, zone, uap: row.uap, semaine: row.semaine, ok: 0, total: 0, score_pct: null }
-      }
-      const rep = String(row.reponse).toUpperCase()
-      if (rep !== 'N/A') {
-        groups[key].total++
-        if (rep === 'OK') groups[key].ok++
-      }
-    })
-    return Object.values(groups).map(g => ({
-      ...g,
-      computedScore: g.total > 0 ? Math.round((g.ok / g.total) * 100) : 0,
-      zoneOrLigne: g.zone
-    }))
-  }, [normalizedAudits])
+  const groupedAudits = useMemo(() => get5SGroupedData(audits), [audits])
 
   const availableWeeks = useMemo(() => {
     const set = new Set()
@@ -110,38 +87,15 @@ export default function AnalysesUap({ audits }) {
 
   // 🌟 CALCUL DES KPI : On fait la moyenne des moyennes des 3 UAP
   const kpis = useMemo(() => {
-    const uaps = { 'UAP 1': [], 'UAP 2': [], 'Logistique': [] }
-    
-    filteredAudits.forEach(a => {
-      const uapName = a.uap ? getUap5S(a.uap) : getUap5S(a.zoneOrLigne)
-      if (uaps[uapName]) uaps[uapName].push(Math.round(a.computedScore))
-    })
-
-    // 🌟 On fait une moyenne avec 2 décimales pour être sûr de l'arrondi final
-    const calcAvg = (arr) => {
-      if (arr.length === 0) return 0;
-      const sum = arr.reduce((a, b) => a + b, 0);
-      return Math.round(sum / arr.length); // 🌟 Arrondi standard
-    }
-
-    const val1 = calcAvg(uaps['UAP 1'])
-    const val2 = calcAvg(uaps['UAP 2'])
-    const val3 = calcAvg(uaps['Logistique'])
-
-    // 🟢 NOUVELLE LOGIQUE USINE : (UAP 1 + UAP 2 + Logistique) / 3
-    const activeUaps = [val1, val2, val3].filter(v => v > 0);
-    const usineAvgRaw = activeUaps.length > 0 
-      ? activeUaps.reduce((a, b) => a + b, 0) / activeUaps.length 
-      : 0;
-    const usineAvg = Math.round(usineAvgRaw * 10) / 10; // Arrondi précis
-
-    return {
-      uap1: val1,
-      uap2: val2,
-      logistique: val3,
-      usine: usineAvg
-    }
-  }, [filteredAudits])
+    const filtered = groupedAudits.filter(a => {
+      const dStr = extractDateString(a.date); if (!dStr) return false
+      if (startDate && dStr < startDate) return false
+      if (endDate && dStr > endDate) return false
+      if (weekFilter && getWeekNumber(a.date, a.semaine) !== weekFilter) return false
+      return true
+    });
+    return calculerMoyennesUAP5S(filtered);
+  }, [groupedAudits, startDate, endDate, weekFilter])
 
   const trendData = useMemo(() => {
     let groupBy = (startDate || endDate) ? 'day' : weekFilter ? 'day' : 'month'

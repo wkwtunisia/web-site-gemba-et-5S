@@ -128,7 +128,14 @@ export default function App() {
           <span style={{ fontWeight: 'bold', fontSize: '1.1rem' }}>WKW Gemba</span>
           <div style={{ width: '24px' }}></div>
         </div>
-        <Sidebar isOpen={isMobileMenuOpen} onClose={() => setIsMobileMenuOpen(false)} currentView={currentView} setCurrentView={setCurrentView} role={role} userEmail={session.user.email} />
+        <Sidebar 
+          currentView={currentView} 
+          setCurrentView={setCurrentView} 
+          role={role} 
+          userEmail={session?.user?.email || ''} 
+          isOpen={isMobileMenuOpen} 
+          onClose={() => setIsMobileMenuOpen(false)} 
+        />
       
       <main className="main-content">
         {message.text && (

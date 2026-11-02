@@ -152,7 +152,7 @@ export default function GembaUap() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1.5rem', marginBottom: '2rem' }}>
         <KpiCard title="UAP 1" score={kpis.uap1} /><KpiCard title="UAP 2" score={kpis.uap2} /><KpiCard title="Logistique" score={kpis.logistique} /><KpiCard title="Moyenne Usine" score={kpis.usine} />
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))', gap: '1.5rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem' }}>
         <GraphCard title="Courbe UAP 1" dataKey="uap1" color="#3b82f6" /><GraphCard title="Courbe UAP 2" dataKey="uap2" color="#8b5cf6" /><GraphCard title="Courbe Logistique" dataKey="logistique" color="#f59e0b" /><GraphCard title="Courbe Moyenne Usine" dataKey="usine" color="#10b981" />
       </div>
     </div>

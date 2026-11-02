@@ -67,7 +67,7 @@ export default function AnalyseRepetitive() {
 
     return sorted.map(s => ({
       ...s,
-      shortName: s.name.length > 50 ? s.name.substring(0, 50) + '...' : s.name
+      shortName: s.name.length > 15 ? s.name.substring(0, 15) + '...' : s.name
     }))
   }, [dataGemba, data5S, type])
 

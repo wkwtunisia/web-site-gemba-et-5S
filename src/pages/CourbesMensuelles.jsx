@@ -100,7 +100,7 @@ export default function CourbesMensuelles() {
         <h3 style={{ margin: '0 0 1rem 0', fontSize: '1rem', color: color }}>{title}</h3>
         {!hasData ? <div className="muted" style={{ height: 250, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Aucune donnée</div> : (
           <div style={{ height: 260 }}>
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
               <LineChart data={chartData} margin={{ top: 25, right: 15, left: -20, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
                 <XAxis dataKey="label" tick={axisStyle} axisLine={false} tickLine={false} dy={10} />
@@ -144,7 +144,7 @@ export default function CourbesMensuelles() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(450px, 1fr))', gap: '1.5rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem' }}>
         <GraphCard title="Évolution UAP 1" dataKey="uap1" color="#3b82f6" />
         <GraphCard title="Évolution UAP 2" dataKey="uap2" color="#8b5cf6" />
         <GraphCard title="Évolution Logistique" dataKey="logistique" color="#f59e0b" />

@@ -1,6 +1,17 @@
 import { useState, useMemo } from 'react'
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, LabelList } from 'recharts'
 
+const getUap5S = (zone) => {
+  if (!zone) return 'UAP 2'
+  const clean = String(zone).trim().toUpperCase().replace(/\s+/g, '')
+  if (clean.includes('MAGASIN') || clean.includes('STOCKAGE') || clean === 'LOGISTIQUE') return 'Logistique'
+  if (clean === 'UAP1' || clean === 'UAP 1') return 'UAP 1'
+  if (clean === 'UAP2' || clean === 'UAP 2') return 'UAP 2'
+  const uap1List = ['F01', 'F02', 'F83', 'F99', 'F86', 'F85', 'L77', 'L76']
+  if (uap1List.includes(clean)) return 'UAP 1'
+  return 'UAP 2'
+}
+
 const getColor = (score) => score >= 86 ? '#10b981' : score >= 80 ? '#f59e0b' : '#ef4444'
 const axisStyle = { fontSize: 12, fill: '#94a3b8' }
 
@@ -30,30 +41,16 @@ const getWeekNumber = (dateStr, rawSemaine) => {
   return `S${String(1 + Math.ceil((firstThursday - target) / 604800000)).padStart(2, '0')}`;
 }
 
-const getUap5S = (zone) => {
-  if (!zone) return 'UAP 2'
-  const clean = String(zone).trim().toUpperCase().replace(/\s+/g, '')
-  if (clean.includes('MAGASIN') || clean.includes('STOCKAGE') || clean === 'LOGISTIQUE') return 'Logistique'
-  if (clean === 'UAP1' || clean === 'UAP 1') return 'UAP 1'
-  if (clean === 'UAP2' || clean === 'UAP 2') return 'UAP 2'
-  const uap1List = ['F01', 'F02', 'F83', 'F99', 'F86', 'F85', 'L77', 'L76']
-  if (uap1List.includes(clean)) return 'UAP 1'
-  return 'UAP 2'
-}
-
 export default function AnalysesUap({ audits }) {
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [weekFilter, setWeekFilter] = useState('')
 
-  // On normalise les données pour s'adapter à la structure de la base 5S
   const normalizedAudits = useMemo(() => {
     return (audits || []).map(row => {
-      // Si c'est un audit 5S avec score_pct
       if (row.score_pct !== undefined && row.score_pct !== null) {
         return { ...row, computedScore: Number(row.score_pct) || 0, zoneOrLigne: row.zone || row.ligne }
       }
-      // Si c'est un audit par question (comme le Gemba)
       const rep = String(row.reponse || '').toUpperCase()
       let ok = rep === 'OK' ? 1 : 0
       let total = rep !== 'N/A' ? 1 : 0
@@ -66,10 +63,9 @@ export default function AnalysesUap({ audits }) {
     })
   }, [audits])
 
-  // Si les données sont ligne par ligne, on doit les regrouper par audit
   const groupedAudits = useMemo(() => {
     const hasRowLevel = normalizedAudits.some(a => a._isRowLevel)
-    if (!hasRowLevel) return normalizedAudits // Déjà groupé (cas score_pct)
+    if (!hasRowLevel) return normalizedAudits
 
     const groups = {}
     normalizedAudits.forEach(row => {
@@ -112,26 +108,38 @@ export default function AnalysesUap({ audits }) {
     })
   }, [groupedAudits, startDate, endDate, weekFilter])
 
+  // 🌟 CALCUL DES KPI : On fait la moyenne des moyennes des 3 UAP
   const kpis = useMemo(() => {
-    const uaps = { 'UAP 1': [], 'UAP 2': [], 'Logistique': [], 'Usine': [] }
+    const uaps = { 'UAP 1': [], 'UAP 2': [], 'Logistique': [] }
     
     filteredAudits.forEach(a => {
       const uapName = a.uap ? getUap5S(a.uap) : getUap5S(a.zoneOrLigne)
-      const pts = Number(a.total_points) || 0
-      const max = Number(a.max_points) || 0
-      const score = max > 0 ? Math.round((pts / max) * 100) : (Number(a.score_pct) || 0)
-      
-      uaps['Usine'].push(score)
-      if (uaps[uapName]) uaps[uapName].push(score)
+      if (uaps[uapName]) uaps[uapName].push(Math.round(a.computedScore))
     })
-    
-    const calcAvg = (arr) => arr.length === 0 ? 0 : Math.round(arr.reduce((a, b) => a + b, 0) / arr.length)
-    
+
+    // 🌟 On fait une moyenne avec 2 décimales pour être sûr de l'arrondi final
+    const calcAvg = (arr) => {
+      if (arr.length === 0) return 0;
+      const sum = arr.reduce((a, b) => a + b, 0);
+      return Math.round(sum / arr.length); // 🌟 Arrondi standard
+    }
+
+    const val1 = calcAvg(uaps['UAP 1'])
+    const val2 = calcAvg(uaps['UAP 2'])
+    const val3 = calcAvg(uaps['Logistique'])
+
+    // 🟢 NOUVELLE LOGIQUE USINE : (UAP 1 + UAP 2 + Logistique) / 3
+    const activeUaps = [val1, val2, val3].filter(v => v > 0);
+    const usineAvgRaw = activeUaps.length > 0 
+      ? activeUaps.reduce((a, b) => a + b, 0) / activeUaps.length 
+      : 0;
+    const usineAvg = Math.round(usineAvgRaw * 10) / 10; // Arrondi précis
+
     return {
-      uap1: calcAvg(uaps['UAP 1']),
-      uap2: calcAvg(uaps['UAP 2']),
-      logistique: calcAvg(uaps['Logistique']),
-      usine: calcAvg(uaps['Usine'])
+      uap1: val1,
+      uap2: val2,
+      logistique: val3,
+      usine: usineAvg
     }
   }, [filteredAudits])
 

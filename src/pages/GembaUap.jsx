@@ -38,13 +38,7 @@ export default function GembaUap() {
   const [endDate, setEndDate] = useState('')
   const [weekFilter, setWeekFilter] = useState('')
 
-  useEffect(() => { 
-    fetchAllGembaData().then(res => { 
-      console.log("[GembaUap] Données reçues :", res.length)
-      setData(res || []); 
-      setLoading(false); 
-    }) 
-  }, [])
+  useEffect(() => { fetchAllGembaData().then(res => { setData(res || []); setLoading(false); }) }, [])
 
   const availableWeeks = useMemo(() => {
     const set = new Set()
@@ -76,50 +70,53 @@ export default function GembaUap() {
       const auditKey = isManual ? `manual|${row.date}|${row.ligne}|${Math.random()}` : `${date}|${ligne}`
 
       if (!groups[auditKey]) {
-        groups[auditKey] = { 
-          date, ligne, 
-          uap: (row.uap || '').trim(), 
-          semaine: row.semaine,
-          ok: 0, total: 0,
-          isManual,
-          manualScore: isManual ? Number(row.score_pct) : 0
-        }
+        groups[auditKey] = { date, ligne, uap: (row.uap || '').trim(), semaine: row.semaine, ok: 0, total: 0, isManual, manualScore: isManual ? Math.round(Number(row.score_pct)) : 0 }
       }
       
       if (!isManual) {
         const rep = String(row.reponse).toUpperCase()
-        if (rep !== 'N/A') {
-          groups[auditKey].total++
-          if (rep === 'OK') groups[auditKey].ok++
-        }
+        if (rep !== 'N/A') { groups[auditKey].total++; if (rep === 'OK') groups[auditKey].ok++ }
       }
     })
 
     return Object.values(groups).map(g => ({ 
-      ...g, 
-      score: g.isManual ? g.manualScore : (g.total > 0 ? Math.round((g.ok / g.total) * 100) : 0) 
+      ...g, score: g.isManual ? g.manualScore : (g.total > 0 ? Math.round((g.ok / g.total) * 100) : 0) 
     }))
   }, [filteredData])
 
   const kpis = useMemo(() => {
-    const uaps = { 'UAP 1': [], 'UAP 2': [], 'Logistique': [], 'Usine': [] }
+    const lineGroups = {}
     
-    groupedAudits.forEach(audit => {
-      const uap = String(audit.uap || '').toUpperCase().replace(/\s+/g, '')
-      uaps['Usine'].push(audit.score)
-      if (uap.includes('UAP1')) uaps['UAP 1'].push(audit.score)
-      else if (uap.includes('UAP2')) uaps['UAP 2'].push(audit.score)
-      else if (uap.includes('LOG')) uaps['Logistique'].push(audit.score)
+    // 1. Moyenne par LIGNE d'abord
+    groupedAudits.forEach(a => {
+      const ligne = a.ligne
+      if (!lineGroups[ligne]) {
+        let uapName = 'UAP 2'
+        const uapClean = String(a.uap || '').toUpperCase().replace(/\s+/g, '')
+        if (uapClean.includes('UAP1')) uapName = 'UAP 1'
+        else if (uapClean.includes('LOG')) uapName = 'Logistique'
+        lineGroups[ligne] = { uapName, scores: [] }
+      }
+      lineGroups[ligne].scores.push(a.score)
     })
-    
+
+    // 2. On regroupe les moyennes par UAP
+    const uaps = { 'UAP 1': [], 'UAP 2': [], 'Logistique': [] }
+    Object.values(lineGroups).forEach(group => {
+      const avg = Math.round(group.scores.reduce((a,b)=>a+b, 0) / group.scores.length)
+      if (uaps[group.uapName]) uaps[group.uapName].push(avg)
+    })
+
+    // 3. Moyenne finale par UAP
     const calcAvg = (arr) => arr.length === 0 ? 0 : Math.round(arr.reduce((a, b) => a + b, 0) / arr.length)
-    
-    return { 
-      uap1: calcAvg(uaps['UAP 1']), 
-      uap2: calcAvg(uaps['UAP 2']), 
-      logistique: calcAvg(uaps['Logistique']), 
-      usine: calcAvg(uaps['Usine']) 
-    }
+    const val1 = calcAvg(uaps['UAP 1'])
+    const val2 = calcAvg(uaps['UAP 2'])
+    const val3 = calcAvg(uaps['Logistique'])
+
+    const activeUaps = [val1, val2, val3].filter(v => v > 0);
+    const usineAvg = activeUaps.length > 0 ? Math.round(activeUaps.reduce((a, b) => a + b, 0) / activeUaps.length) : 0;
+
+    return { uap1: val1, uap2: val2, logistique: val3, usine: usineAvg }
   }, [groupedAudits])
 
   const trendData = useMemo(() => {
@@ -127,16 +124,11 @@ export default function GembaUap() {
     const groups = {}
     
     groupedAudits.forEach(audit => {
-      let key = ''
-      if (groupBy === 'month') key = audit.date.substring(0, 7)
-      else if (groupBy === 'week') key = getWeekNumber(audit.date, audit.semaine)
-      else key = audit.date
-      
+      let key = groupBy === 'month' ? audit.date.substring(0, 7) : groupBy === 'week' ? getWeekNumber(audit.date, audit.semaine) : audit.date
       if (!key) return
       if (!groups[key]) groups[key] = { key, uap1: [], uap2: [], logistique: [], usine: [] }
       
       groups[key].usine.push(audit.score)
-      
       const uap = String(audit.uap || '').toUpperCase().replace(/\s+/g, '')
       if (uap.includes('UAP1')) groups[key].uap1.push(audit.score)
       else if (uap.includes('UAP2')) groups[key].uap2.push(audit.score)
@@ -149,14 +141,7 @@ export default function GembaUap() {
       let label = g.key
       if (groupBy === 'month') label = new Date(`${g.key}-01T12:00:00`).toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' })
       else if (groupBy === 'day') label = new Date(`${g.key}T12:00:00`).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })
-      
-      return { 
-        label, key: g.key, 
-        uap1: calcAvg(g.uap1), 
-        uap2: calcAvg(g.uap2), 
-        logistique: calcAvg(g.logistique), 
-        usine: calcAvg(g.usine) 
-      }
+      return { label, key: g.key, uap1: calcAvg(g.uap1), uap2: calcAvg(g.uap2), logistique: calcAvg(g.logistique), usine: calcAvg(g.usine) }
     }).sort((a, b) => String(a.key).localeCompare(String(b.key)))
   }, [groupedAudits, startDate, endDate, weekFilter])
 

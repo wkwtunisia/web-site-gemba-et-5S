@@ -1,9 +1,12 @@
 import { useState } from 'react'
 import { supabase } from '../supabaseClient'
 
-export default function Sidebar({ currentView, setCurrentView, role, userEmail }) {
+export default function Sidebar({ currentView, setCurrentView, role, userEmail, isOpen, onClose }) {
   return (
-    <aside className="sidebar">
+    <>
+      <div className={`sidebar-overlay ${isOpen ? 'active' : ''}`} onClick={onClose}></div>
+      <aside className={`sidebar ${isOpen ? 'open' : ''}`}>
+        <button className="mobile-close-btn" onClick={onClose}>✕</button>
       <div className="sidebar-brand">
         <img src="/logo.png" alt="WKW Logo" style={{ height: '32px', objectFit: 'contain' }} />
         <span>WKW Gemba</span>
@@ -11,51 +14,51 @@ export default function Sidebar({ currentView, setCurrentView, role, userEmail }
       
       <div className="sidebar-nav">
         <div className="sidebar-section">Mon Espace</div>
-        <button className={`nav-item ${currentView === 'courbes_mensuelles' ? 'active' : ''}`} onClick={() => setCurrentView('courbes_mensuelles')}>📈 Courbes Mensuelles</button>
-        <button className={`nav-item ${currentView === 'tendance_ligne' ? 'active' : ''}`} onClick={() => setCurrentView('tendance_ligne')}>📈 Tendance par Ligne</button>
-        <button className={`nav-item ${currentView === 'analyse_repetitive' ? 'active' : ''}`} onClick={() => setCurrentView('analyse_repetitive')}>🔄 Analyses répétitives</button>
-        <button className={`nav-item ${currentView === 'tv' ? 'active' : ''}`} onClick={() => setCurrentView('tv')}>📺 Dashboard TV</button>
-        <button className={`nav-item ${currentView === 'resultats_s1' ? 'active' : ''}`} onClick={() => setCurrentView('resultats_s1')}>📅 Résultats S-1</button>
-        <button className={`nav-item ${currentView === 'mes_actions' ? 'active' : ''}`} onClick={() => setCurrentView('mes_actions')}>📌 Mes Actions</button>
-        <button className={`nav-item ${currentView === 'historique' ? 'active' : ''}`} onClick={() => setCurrentView('historique')}>📜 {role === 'admin' ? 'Historique Global' : 'Mon Historique'}</button>
+        <button className={`nav-item ${currentView === 'courbes_mensuelles' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('courbes_mensuelles') }}>📈 Courbes Mensuelles</button>
+        <button className={`nav-item ${currentView === 'tendance_ligne' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('tendance_ligne') }}>📈 Tendance par Ligne</button>
+        <button className={`nav-item ${currentView === 'analyse_repetitive' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('analyse_repetitive') }}>🔄 Analyses répétitives</button>
+        <button className={`nav-item ${currentView === 'tv' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('tv') }}>📺 Dashboard TV</button>
+        <button className={`nav-item ${currentView === 'resultats_s1' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('resultats_s1') }}>📅 Résultats S-1</button>
+        <button className={`nav-item ${currentView === 'mes_actions' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('mes_actions') }}>📌 Mes Actions</button>
+        <button className={`nav-item ${currentView === 'historique' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('historique') }}>📜 {role === 'admin' ? 'Historique Global' : 'Mon Historique'}</button>
         {role === 'admin' && (
-          <button className={`nav-item ${currentView === 'parametres' ? 'active' : ''}`} onClick={() => setCurrentView('parametres')}>⚙️ Paramètres</button>
+          <button className={`nav-item ${currentView === 'parametres' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('parametres') }}>⚙️ Paramètres</button>
         )}
 
         <div className="sidebar-section" style={{ marginTop: '1rem' }}>5S</div>
         {role === 'admin' && (
           <>
-            <button className={`nav-item ${currentView === 'import' ? 'active' : ''}`} onClick={() => setCurrentView('import')}>📥 Importation 5S</button>
-            <button className={`nav-item ${currentView === 'plan_action_5s' ? 'active' : ''}`} onClick={() => setCurrentView('plan_action_5s')}>📋 Plan d'Action 5S</button>
-            <button className={`nav-item ${currentView === 'pilotes_5s' ? 'active' : ''}`} onClick={() => setCurrentView('pilotes_5s')}>👤 Suivi par Pilote</button>
+            <button className={`nav-item ${currentView === 'import' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('import') }}>📥 Importation 5S</button>
+            <button className={`nav-item ${currentView === 'plan_action_5s' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('plan_action_5s') }}>📋 Plan d'Action 5S</button>
+            <button className={`nav-item ${currentView === 'pilotes_5s' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('pilotes_5s') }}>👤 Suivi par Pilote</button>
           </>
         )}
-        <button className={`nav-item ${currentView === 'planifie' ? 'active' : ''}`} onClick={() => setCurrentView('planifie')}>📊 Planifié vs Réalisé</button>
-        <button className={`nav-item ${currentView === 'uap' ? 'active' : ''}`} onClick={() => setCurrentView('uap')}>📈 Analyses UAP</button>
-        <button className={`nav-item ${currentView === 'lignes' ? 'active' : ''}`} onClick={() => setCurrentView('lignes')}>📍 Résultats par Ligne</button>
-        <button className={`nav-item ${currentView === 'top3' ? 'active' : ''}`} onClick={() => setCurrentView('top3')}>🏆 Top & Bottom 3</button>
-        <button className={`nav-item ${currentView === 'heatmap_5s' ? 'active' : ''}`} onClick={() => setCurrentView('heatmap_5s')}>🔥 Heatmap 5S</button>
-        <button className={`nav-item ${currentView === 'piliers' ? 'active' : ''}`} onClick={() => setCurrentView('piliers')}>🧭 Résultats par Axe</button>
-        <button className={`nav-item ${currentView === 'analyse' ? 'active' : ''}`} onClick={() => setCurrentView('analyse')}>🎯 Analyse & Priorités</button>
-        <button className={`nav-item ${currentView === 'rapport' ? 'active' : ''}`} onClick={() => setCurrentView('rapport')}>📄 Rapport d'Audit</button>
+        <button className={`nav-item ${currentView === 'planifie' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('planifie') }}>📊 Planifié vs Réalisé</button>
+        <button className={`nav-item ${currentView === 'uap' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('uap') }}>📈 Analyses UAP</button>
+        <button className={`nav-item ${currentView === 'lignes' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('lignes') }}>📍 Résultats par Ligne</button>
+        <button className={`nav-item ${currentView === 'top3' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('top3') }}>🏆 Top & Bottom 3</button>
+        <button className={`nav-item ${currentView === 'heatmap_5s' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('heatmap_5s') }}>🔥 Heatmap 5S</button>
+        <button className={`nav-item ${currentView === 'piliers' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('piliers') }}>🧭 Résultats par Axe</button>
+        <button className={`nav-item ${currentView === 'analyse' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('analyse') }}>🎯 Analyse & Priorités</button>
+        <button className={`nav-item ${currentView === 'rapport' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('rapport') }}>📄 Rapport d'Audit</button>
 
         <div className="sidebar-section">Gemba (5M)</div>
         {role === 'admin' && (
           <>
-            <button className={`nav-item ${currentView === 'import_gemba' ? 'active' : ''}`} onClick={() => setCurrentView('import_gemba')}>🏭 Importation Gemba</button>
-            <button className={`nav-item ${currentView === 'saisie_gemba' ? 'active' : ''}`} onClick={() => setCurrentView('saisie_gemba')}>📝 Saisie Manuelle</button>
-            <button className={`nav-item ${currentView === 'plan_action_gemba' ? 'active' : ''}`} onClick={() => setCurrentView('plan_action_gemba')}>📋 Plan d'Action Gemba</button>
-            <button className={`nav-item ${currentView === 'pilotes_gemba' ? 'active' : ''}`} onClick={() => setCurrentView('pilotes_gemba')}>👤 Suivi par Pilote</button>
+            <button className={`nav-item ${currentView === 'import_gemba' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('import_gemba') }}>🏭 Importation Gemba</button>
+            <button className={`nav-item ${currentView === 'saisie_gemba' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('saisie_gemba') }}>📝 Saisie Manuelle</button>
+            <button className={`nav-item ${currentView === 'plan_action_gemba' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('plan_action_gemba') }}>📋 Plan d'Action Gemba</button>
+            <button className={`nav-item ${currentView === 'pilotes_gemba' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('pilotes_gemba') }}>👤 Suivi par Pilote</button>
           </>
         )}
-        <button className={`nav-item ${currentView === 'planifie_gemba' ? 'active' : ''}`} onClick={() => setCurrentView('planifie_gemba')}>📊 Planifié vs Réalisé</button>
-        <button className={`nav-item ${currentView === 'uap_gemba' ? 'active' : ''}`} onClick={() => setCurrentView('uap_gemba')}>📈 Analyses UAP</button>
-        <button className={`nav-item ${currentView === 'lignes_gemba' ? 'active' : ''}`} onClick={() => setCurrentView('lignes_gemba')}>📍 Résultats par Ligne</button>
-        <button className={`nav-item ${currentView === 'top3_gemba' ? 'active' : ''}`} onClick={() => setCurrentView('top3_gemba')}>🏆 Top & Bottom 3</button>
-        <button className={`nav-item ${currentView === 'heatmap_gemba' ? 'active' : ''}`} onClick={() => setCurrentView('heatmap_gemba')}>🔥 Heatmap Gemba</button>
-        <button className={`nav-item ${currentView === 'piliers_gemba' ? 'active' : ''}`} onClick={() => setCurrentView('piliers_gemba')}>🧭 Résultats par M</button>
-        <button className={`nav-item ${currentView === 'analyse_gemba' ? 'active' : ''}`} onClick={() => setCurrentView('analyse_gemba')}>🎯 Analyse & Priorités</button>
-        <button className={`nav-item ${currentView === 'rapport_gemba' ? 'active' : ''}`} onClick={() => setCurrentView('rapport_gemba')}>📄 Rapport d'Audit Gemba</button>
+        <button className={`nav-item ${currentView === 'planifie_gemba' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('planifie_gemba') }}>📊 Planifié vs Réalisé</button>
+        <button className={`nav-item ${currentView === 'uap_gemba' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('uap_gemba') }}>📈 Analyses UAP</button>
+        <button className={`nav-item ${currentView === 'lignes_gemba' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('lignes_gemba') }}>📍 Résultats par Ligne</button>
+        <button className={`nav-item ${currentView === 'top3_gemba' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('top3_gemba') }}>🏆 Top & Bottom 3</button>
+        <button className={`nav-item ${currentView === 'heatmap_gemba' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('heatmap_gemba') }}>🔥 Heatmap Gemba</button>
+        <button className={`nav-item ${currentView === 'piliers_gemba' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('piliers_gemba') }}>🧭 Résultats par M</button>
+        <button className={`nav-item ${currentView === 'analyse_gemba' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('analyse_gemba') }}>🎯 Analyse & Priorités</button>
+        <button className={`nav-item ${currentView === 'rapport_gemba' ? 'active' : ''}`} onClick={() => { if(onClose) onClose(); setCurrentView('rapport_gemba') }}>📄 Rapport d'Audit Gemba</button>
       </div>
 
       <div className="sidebar-footer">
@@ -67,5 +70,6 @@ export default function Sidebar({ currentView, setCurrentView, role, userEmail }
         </button>
       </div>
     </aside>
+    </>
   )
 }

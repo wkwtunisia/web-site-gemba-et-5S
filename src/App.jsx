@@ -39,6 +39,8 @@ import { parseFile } from './services/importExcel'
 import { fetchAudits, upsertAudits } from './services/auditsApi'
 
 export default function App() {
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
   const [session, setSession] = useState(null)
   const [role, setRole] = useState('user')
   const [loading, setLoading] = useState(true)
@@ -121,7 +123,12 @@ export default function App() {
 
   return (
     <div className="app-layout">
-      <Sidebar currentView={currentView} setCurrentView={setCurrentView} role={role} userEmail={session.user.email} />
+      <div className="mobile-header">
+          <button className="mobile-menu-btn" onClick={() => setIsMobileMenuOpen(true)}>☰</button>
+          <span style={{ fontWeight: 'bold', fontSize: '1.1rem' }}>WKW Gemba</span>
+          <div style={{ width: '24px' }}></div>
+        </div>
+        <Sidebar isOpen={isMobileMenuOpen} onClose={() => setIsMobileMenuOpen(false)} currentView={currentView} setCurrentView={setCurrentView} role={role} userEmail={session.user.email} />
       
       <main className="main-content">
         {message.text && (

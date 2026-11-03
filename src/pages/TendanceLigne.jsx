@@ -112,8 +112,8 @@ export default function TendanceLigne() {
         if (grouped.length > 0) score = Math.round(grouped.reduce((sum, g) => sum + g.computedScore, 0) / grouped.length)
       }
       
-      // 🌟 On affiche tous les points valides (même 0%)
-      if (score !== null && score !== undefined) {
+      // 🌟 LE FILTRE ABSOLU : On ignore toutes les dates où le score est 0 (données manquantes)
+      if (score > 0) {
         result.push({
           date: dateStr,
           label: new Date(`${dateStr}T12:00:00`).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }),

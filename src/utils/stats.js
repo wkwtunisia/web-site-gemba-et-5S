@@ -10,19 +10,35 @@ export const getGembaGroupedData = (audits) => {
     const auditKey = isManual ? `manual|${row.date}|${row.ligne}|${Math.random()}` : `${date}|${ligne}`
     
     if (!groups[auditKey]) {
-      groups[auditKey] = { date, ligne, uap: (row.uap || '').trim(), isManual, manualScore: isManual ? Math.round(Number(row.score_pct)) : 0, ok: 0, total: 0 }
+      groups[auditKey] = { 
+        date, ligne, uap: (row.uap || '').trim(), isManual, 
+        manualScore: isManual ? Math.round(Number(row.score_pct)) : 0, 
+        ok: 0, total: 0,
+        fallbackScore: row.score_pct ? Number(row.score_pct) : null // 🌟 On garde le score_pct de côté
+      }
     }
     
     if (!isManual) {
-      const rep = String(row.reponse).toUpperCase()
-      if (rep !== 'N/A') { groups[auditKey].total++; if (rep === 'OK') groups[auditKey].ok++ }
+      const rep = String(row.reponse || '').toUpperCase().trim()
+      if (rep !== 'N/A' && rep !== '') { 
+        groups[auditKey].total++; 
+        if (rep === 'OK') groups[auditKey].ok++ 
+      }
     }
   })
   
-  return Object.values(groups).map(g => ({ 
-    ...g, 
-    score: g.isManual ? g.manualScore : (g.total > 0 ? Math.round((g.ok / g.total) * 100) : 0) 
-  }))
+  return Object.values(groups).map(g => {
+    let score = 0;
+    if (g.isManual) {
+      score = g.manualScore;
+    } else if (g.total > 0) {
+      score = Math.round((g.ok / g.total) * 100);
+    } else if (g.fallbackScore !== null) {
+      // 🌟 LE SECRET : Si le calcul OK/NOK donne 0, on utilise le score_pct de la base
+      score = Math.round(g.fallbackScore);
+    }
+    return score !== null ? { ...g, score } : null;
+  }).filter(Boolean)
 }
 
 // 🌟 REGROUPEMENT 5S (date + zone)

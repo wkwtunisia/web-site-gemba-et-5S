@@ -76,10 +76,11 @@ export default function GembaAnalyse() {
     const cleanQ = String(row.question).trim().toUpperCase();
     const cleanM = String(row.point_m || '').trim().toUpperCase();
     
-    if (cleanQ === cleanM && cleanQ !== '') return false;
+    // On accepte tout sauf si c'est vide
+    if (cleanQ === cleanM && cleanQ !== '') return true;
+    
     const isGeneric = ['MILIEU', 'MATIÈRE', 'MATIERE', 'MÉTHODE', 'METHODE', 'MAINTENANCE', "MAIN D'OEUVRE", "MAIN D'ŒUVRE", 'OK DÉMARRAGE', 'OK DEMARRAGE'].includes(cleanQ);
-    if (isGeneric) return false;
-    if (cleanQ.includes('(OK DÉMARRAGE)') || cleanQ.includes('(OK DEMARRAGE)')) return false;
+    if (isGeneric) return true; // On les accepte aussi
     
     return true;
   };

@@ -1,3 +1,4 @@
+import HistoriqueAudits from './pages/HistoriqueAudits'
 import CourbesMensuelles from './pages/CourbesMensuelles'
 import SaisieManuelleGemba from './pages/SaisieManuelleGemba'
 import GembaPiliers from './pages/GembaPiliers'
@@ -166,6 +167,7 @@ export default function App() {
           {currentView === 'analyse_repetitive' && <AnalyseRepetitive />}
           {currentView === 'saisie_gemba' && <SaisieManuelleGemba />}
         {currentView === 'courbes_mensuelles' && <CourbesMensuelles />}
+        {currentView === 'historique_audits' && <HistoriqueAudits />}
         {currentView === 'rapport_gemba' && <RapportGemba />}
         {currentView === 'heatmap_gemba' && <HeatmapGemba />}
 

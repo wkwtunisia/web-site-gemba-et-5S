@@ -64,6 +64,7 @@ export default function ImportGemba() {
           point_m: getVal(row, 'Point M'),
           question: getVal(row, 'Question'),
           reponse: String(getVal(row, 'Réponse') || getVal(row, 'Reponse') || '').toUpperCase().trim(),
+          score_pct: Number(getVal(row, 'Score (%)') || getVal(row, 'Score')) || null,
           auditeur: getVal(row, 'Auditeur'),
           action_texte: actionText,
           pilote: getVal(row, 'Pilote'),

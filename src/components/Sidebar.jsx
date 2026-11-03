@@ -3,23 +3,31 @@ import { supabase } from '../supabaseClient'
 export default function Sidebar({ currentView, setCurrentView, role, userEmail, isOpen, onClose }) {
   
   const handleNav = (view) => {
-    setCurrentView(view);
+    if (setCurrentView) setCurrentView(view);
     if (onClose) onClose();
   };
 
   return (
     <>
-      {isOpen && <div className="sidebar-overlay active" onClick={onClose}></div>}
-      
+      {isOpen && (
+        <div 
+          className="sidebar-overlay active" 
+          onClick={onClose} 
+          style={{ display: 'block', position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9998 }}
+        ></div>
+      )}
+
       <aside className={`sidebar ${isOpen ? 'open' : ''}`}>
         <button className="mobile-close-btn" onClick={onClose}>✕</button>
         <div className="sidebar-brand">
-          <img src="/logo.png" alt="Logo" style={{ height: '32px' }} />
+          <img src="/logo.png" alt="WKW Logo" style={{ height: '32px', objectFit: 'contain' }} />
           <span>WKW Gemba</span>
         </div>
         
         <div className="sidebar-nav">
           <div className="sidebar-section">Mon Espace</div>
+          
+          <button className={`nav-item ${currentView === 'historique_audits' ? 'active' : ''}`} onClick={() => handleNav('historique_audits')}>📜 Historique des Audits</button>
           <button className={`nav-item ${currentView === 'courbes_mensuelles' ? 'active' : ''}`} onClick={() => handleNav('courbes_mensuelles')}>📈 Courbes Mensuelles</button>
           <button className={`nav-item ${currentView === 'tendance_ligne' ? 'active' : ''}`} onClick={() => handleNav('tendance_ligne')}>📈 Tendance par Ligne</button>
           <button className={`nav-item ${currentView === 'analyse_repetitive' ? 'active' : ''}`} onClick={() => handleNav('analyse_repetitive')}>🔄 Analyses répétitives</button>
@@ -27,9 +35,11 @@ export default function Sidebar({ currentView, setCurrentView, role, userEmail, 
           <button className={`nav-item ${currentView === 'resultats_s1' ? 'active' : ''}`} onClick={() => handleNav('resultats_s1')}>📅 Résultats S-1</button>
           <button className={`nav-item ${currentView === 'mes_actions' ? 'active' : ''}`} onClick={() => handleNav('mes_actions')}>📌 Mes Actions</button>
           <button className={`nav-item ${currentView === 'historique' ? 'active' : ''}`} onClick={() => handleNav('historique')}>📜 {role === 'admin' ? 'Historique Global' : 'Mon Historique'}</button>
-          {role === 'admin' && <button className={`nav-item ${currentView === 'parametres' ? 'active' : ''}`} onClick={() => handleNav('parametres')}>⚙️ Paramètres</button>}
+          {role === 'admin' && (
+            <button className={`nav-item ${currentView === 'parametres' ? 'active' : ''}`} onClick={() => handleNav('parametres')}>⚙️ Paramètres</button>
+          )}
 
-          <div className="sidebar-section">5S</div>
+          <div className="sidebar-section" style={{ marginTop: '1rem' }}>5S</div>
           {role === 'admin' && (
             <>
               <button className={`nav-item ${currentView === 'import' ? 'active' : ''}`} onClick={() => handleNav('import')}>📥 Importation 5S</button>
@@ -69,7 +79,9 @@ export default function Sidebar({ currentView, setCurrentView, role, userEmail, 
           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.5rem', wordBreak: 'break-all' }}>
             Connecté : <strong>{userEmail}</strong><br/>({role})
           </div>
-          <button className="btn btn-danger" onClick={() => supabase.auth.signOut()} style={{ width: '100%', padding: '0.5rem' }}>Déconnexion</button>
+          <button className="btn btn-danger" onClick={() => supabase.auth.signOut()} style={{ width: '100%', padding: '0.5rem', fontSize: '0.8rem' }}>
+            Déconnexion
+          </button>
         </div>
       </aside>
     </>

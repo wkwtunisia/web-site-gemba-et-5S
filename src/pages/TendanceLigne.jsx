@@ -74,7 +74,6 @@ export default function TendanceLigne() {
     return Array.from(set).sort()
   }, [type, dataGemba, data5S])
 
-  // 🌟 CALCUL DES DONNÉES ET DES STATISTIQUES
   const { chartData, stats } = useMemo(() => {
     if (!selectedLigne) return { chartData: [], stats: null }
     
@@ -113,21 +112,22 @@ export default function TendanceLigne() {
         if (grouped.length > 0) score = Math.round(grouped.reduce((sum, g) => sum + g.computedScore, 0) / grouped.length)
       }
       
-      result.push({
-        date: dateStr,
-        label: new Date(`${dateStr}T12:00:00`).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }),
-        score: score
-      })
+      // 🌟 On affiche tous les points valides (même 0%)
+      if (score !== null && score !== undefined) {
+        result.push({
+          date: dateStr,
+          label: new Date(`${dateStr}T12:00:00`).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }),
+          score: score
+        })
+      }
     })
 
     const sorted = result.sort((a, b) => a.date.localeCompare(b.date))
     
-    // Calcul des stats
     const scores = sorted.map(d => d.score)
     const totalAudits = sorted.length
     const avgScore = scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0
     
-    // Calcul de la tendance (comparaison du dernier score avec le précédent)
     let tendance = 'Stable'
     let trendColor = 'var(--text-muted)'
     let trendIcon = '➡️'
@@ -150,7 +150,11 @@ export default function TendanceLigne() {
 
     return {
       chartData: sorted,
-      stats: { totalAudits, avgScore, tendance, trendColor, trendIcon, maxScore: Math.max(...scores), minScore: Math.min(...scores) }
+      stats: { 
+        totalAudits, avgScore, tendance, trendColor, trendIcon, 
+        maxScore: scores.length > 0 ? Math.max(...scores) : 0, 
+        minScore: scores.length > 0 ? Math.min(...scores) : 0 
+      }
     }
   }, [type, selectedLigne, selectedWeek, dataGemba, data5S])
 
@@ -163,7 +167,6 @@ export default function TendanceLigne() {
 
   return (
     <div>
-      {/* En-tête et Filtres */}
       <div className="flex-between" style={{ marginBottom: '1.5rem', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
         <h1 style={{ fontSize: '1.5rem', margin: 0 }}>📈 Tendance par ligne</h1>
         
@@ -194,12 +197,11 @@ export default function TendanceLigne() {
       ) : chartData.length === 0 ? (
         <div className="card">
           <div className="muted" style={{ height: 300, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            Aucune donnée pour cette sélection.
+            Aucune donnée valide pour cette sélection.
           </div>
         </div>
       ) : (
         <>
-          {/* 🌟 CARTES DE STATISTIQUES */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
             <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '1rem' }}>
               <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '0.9rem', color: 'var(--text-muted)' }}>NOMBRE D'AUDITS</h3>
@@ -226,7 +228,6 @@ export default function TendanceLigne() {
             </div>
           </div>
 
-          {/* 🌟 LE GRAPHIQUE */}
           <div className="card">
             <h3 style={{ margin: '0 0 1.5rem 0', fontSize: '1.1rem', color: 'var(--text-main)' }}>
               Courbe d'évolution : {selectedLigne}
@@ -239,7 +240,6 @@ export default function TendanceLigne() {
                   <YAxis domain={[0, 100]} tick={{ fill: '#94a3b8' }} axisLine={false} tickLine={false} />
                   <Tooltip contentStyle={{ background: '#1e293b', border: 'none', borderRadius: 8, color: '#fff' }} formatter={(v) => [`${v}%`, 'Score']} />
                   
-                  {/* Ligne de référence pour la moyenne */}
                   <ReferenceLine y={stats.avgScore} stroke="#f59e0b" strokeDasharray="3 3" label={{ position: 'insideTopRight', value: `Moyenne: ${stats.avgScore}%`, fill: '#f59e0b', fontSize: 12 }} />
                   
                   <Line type="monotone" dataKey="score" stroke="#3b82f6" strokeWidth={3} dot={{ r: 6, fill: '#3b82f6', stroke: '#1e293b', strokeWidth: 2 }} activeDot={{ r: 8 }}>

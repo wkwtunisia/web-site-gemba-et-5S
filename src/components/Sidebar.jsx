@@ -43,6 +43,7 @@ export default function Sidebar({ currentView, setCurrentView, role, userEmail, 
           {role === 'admin' && (
             <>
               <button className={`nav-item ${currentView === 'import' ? 'active' : ''}`} onClick={() => handleNav('import')}>📥 Importation 5S</button>
+              <button className={`nav-item ${currentView === 'saisie_5s' ? 'active' : ''}`} onClick={() => handleNav('saisie_5s')}>📝 Saisie Manuelle</button>
               <button className={`nav-item ${currentView === 'plan_action_5s' ? 'active' : ''}`} onClick={() => handleNav('plan_action_5s')}>📋 Plan d'Action 5S</button>
               <button className={`nav-item ${currentView === 'pilotes_5s' ? 'active' : ''}`} onClick={() => handleNav('pilotes_5s')}>👤 Suivi par Pilote</button>
             </>

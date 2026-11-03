@@ -1,3 +1,4 @@
+import SaisieManuelle5S from './pages/SaisieManuelle5S'
 import HistoriqueAudits from './pages/HistoriqueAudits'
 import CourbesMensuelles from './pages/CourbesMensuelles'
 import SaisieManuelleGemba from './pages/SaisieManuelleGemba'
@@ -168,6 +169,7 @@ export default function App() {
           {currentView === 'saisie_gemba' && <SaisieManuelleGemba />}
         {currentView === 'courbes_mensuelles' && <CourbesMensuelles />}
         {currentView === 'historique_audits' && <HistoriqueAudits />}
+        {currentView === 'saisie_5s' && <SaisieManuelle5S />}
         {currentView === 'rapport_gemba' && <RapportGemba />}
         {currentView === 'heatmap_gemba' && <HeatmapGemba />}
 

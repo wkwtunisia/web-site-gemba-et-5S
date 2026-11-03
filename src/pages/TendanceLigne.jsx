@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../supabaseClient'
 import { fetchAllGembaData } from '../services/gembaApi'
 import { getGembaGroupedData, get5SGroupedData } from '../utils/stats'
-import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, LabelList } from 'recharts'
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, LabelList, ReferenceLine } from 'recharts'
 
 const extractDateString = (dateStr) => {
   if (!dateStr) return null;
@@ -29,6 +29,7 @@ const getWeekNumber = (dateStr, rawSemaine) => {
 }
 
 const normalizeLigne = (str) => String(str || '').trim().toUpperCase().replace(/\s+/g, '')
+const getColor = (score) => score >= 90 ? '#10b981' : score >= 80 ? '#f59e0b' : '#ef4444'
 
 export default function TendanceLigne() {
   const [type, setType] = useState('5S')
@@ -73,13 +74,13 @@ export default function TendanceLigne() {
     return Array.from(set).sort()
   }, [type, dataGemba, data5S])
 
-  const chartData = useMemo(() => {
-    if (!selectedLigne) return []
+  // 🌟 CALCUL DES DONNÉES ET DES STATISTIQUES
+  const { chartData, stats } = useMemo(() => {
+    if (!selectedLigne) return { chartData: [], stats: null }
     
     const source = type === 'Gemba' ? dataGemba : data5S
     const targetLine = normalizeLigne(selectedLigne)
 
-    // 1. Filtrer par ligne et semaine
     const filtered = source.filter(row => {
       const rowLigne = normalizeLigne(type === 'Gemba' ? row.ligne : row.zone)
       if (rowLigne !== targetLine) return false
@@ -91,9 +92,8 @@ export default function TendanceLigne() {
       return true
     })
 
-    if (filtered.length === 0) return []
+    if (filtered.length === 0) return { chartData: [], stats: null }
 
-    // 2. Grouper par date
     const byDate = {}
     filtered.forEach(row => {
       const dStr = extractDateString(row.date)
@@ -102,20 +102,15 @@ export default function TendanceLigne() {
       byDate[dStr].push(row)
     })
 
-    // 3. Calculer le score par date via les fonctions standardisées
     const result = []
     Object.entries(byDate).forEach(([dateStr, rows]) => {
       let score = 0
       if (type === 'Gemba') {
         const grouped = getGembaGroupedData(rows)
-        if (grouped.length > 0) {
-          score = Math.round(grouped.reduce((sum, g) => sum + g.score, 0) / grouped.length)
-        }
+        if (grouped.length > 0) score = Math.round(grouped.reduce((sum, g) => sum + g.score, 0) / grouped.length)
       } else {
         const grouped = get5SGroupedData(rows)
-        if (grouped.length > 0) {
-          score = Math.round(grouped.reduce((sum, g) => sum + g.computedScore, 0) / grouped.length)
-        }
+        if (grouped.length > 0) score = Math.round(grouped.reduce((sum, g) => sum + g.computedScore, 0) / grouped.length)
       }
       
       result.push({
@@ -125,7 +120,38 @@ export default function TendanceLigne() {
       })
     })
 
-    return result.sort((a, b) => a.date.localeCompare(b.date))
+    const sorted = result.sort((a, b) => a.date.localeCompare(b.date))
+    
+    // Calcul des stats
+    const scores = sorted.map(d => d.score)
+    const totalAudits = sorted.length
+    const avgScore = scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0
+    
+    // Calcul de la tendance (comparaison du dernier score avec le précédent)
+    let tendance = 'Stable'
+    let trendColor = 'var(--text-muted)'
+    let trendIcon = '➡️'
+    
+    if (scores.length >= 2) {
+      const last = scores[scores.length - 1]
+      const prev = scores[scores.length - 2]
+      const diff = last - prev
+      
+      if (diff > 2) {
+        tendance = 'En amélioration'
+        trendColor = 'var(--success)'
+        trendIcon = '📈'
+      } else if (diff < -2) {
+        tendance = 'En baisse'
+        trendColor = 'var(--danger)'
+        trendIcon = '📉'
+      }
+    }
+
+    return {
+      chartData: sorted,
+      stats: { totalAudits, avgScore, tendance, trendColor, trendIcon, maxScore: Math.max(...scores), minScore: Math.min(...scores) }
+    }
   }, [type, selectedLigne, selectedWeek, dataGemba, data5S])
 
   const CustomLabel = (props) => {
@@ -137,61 +163,94 @@ export default function TendanceLigne() {
 
   return (
     <div>
+      {/* En-tête et Filtres */}
       <div className="flex-between" style={{ marginBottom: '1.5rem', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
         <h1 style={{ fontSize: '1.5rem', margin: 0 }}>📈 Tendance par ligne</h1>
         
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Type :</label>
-            <select className="filter-control" value={type} onChange={e => { setType(e.target.value); setSelectedLigne(''); setSelectedWeek(''); }}>
-              <option value="5S">5S</option>
-              <option value="Gemba">Gemba</option>
-            </select>
-          </div>
+          <select className="filter-control" value={type} onChange={e => { setType(e.target.value); setSelectedLigne(''); setSelectedWeek(''); }}>
+            <option value="5S">5S</option>
+            <option value="Gemba">Gemba</option>
+          </select>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Semaine :</label>
-            <select className="filter-control" value={selectedWeek} onChange={e => setSelectedWeek(e.target.value)}>
-              <option value="">Toutes</option>
-              {availableWeeks.map(w => <option key={w} value={w}>{w}</option>)}
-            </select>
-          </div>
+          <select className="filter-control" value={selectedWeek} onChange={e => setSelectedWeek(e.target.value)}>
+            <option value="">Toutes les semaines</option>
+            {availableWeeks.map(w => <option key={w} value={w}>{w}</option>)}
+          </select>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Ligne :</label>
-            <select className="filter-control" value={selectedLigne} onChange={e => setSelectedLigne(e.target.value)}>
-              <option value="">-- Choisir --</option>
-              {availableLines.map(l => <option key={l} value={l}>{l}</option>)}
-            </select>
-          </div>
+          <select className="filter-control" value={selectedLigne} onChange={e => setSelectedLigne(e.target.value)}>
+            <option value="">-- Choisir une ligne --</option>
+            {availableLines.map(l => <option key={l} value={l}>{l}</option>)}
+          </select>
         </div>
       </div>
 
-      <div className="card">
-        {!selectedLigne ? (
+      {!selectedLigne ? (
+        <div className="card">
           <div className="muted" style={{ height: 300, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            Veuillez sélectionner une ligne pour voir son évolution.
+            Veuillez sélectionner une ligne pour voir son évolution et ses statistiques.
           </div>
-        ) : chartData.length === 0 ? (
+        </div>
+      ) : chartData.length === 0 ? (
+        <div className="card">
           <div className="muted" style={{ height: 300, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             Aucune donnée pour cette sélection.
           </div>
-        ) : (
-          <div style={{ height: 400 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData} margin={{ top: 30, right: 30, left: 0, bottom: 10 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
-                <XAxis dataKey="label" tick={{ fill: '#94a3b8' }} axisLine={false} tickLine={false} dy={10} />
-                <YAxis domain={[0, 100]} tick={{ fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-                <Tooltip contentStyle={{ background: '#1e293b', border: 'none', borderRadius: 8, color: '#fff' }} formatter={(v) => [`${v}%`, 'Score']} />
-                <Line type="monotone" dataKey="score" stroke="#3b82f6" strokeWidth={3} dot={{ r: 6, fill: '#3b82f6', stroke: '#1e293b', strokeWidth: 2 }} activeDot={{ r: 8 }}>
-                  <LabelList content={<CustomLabel />} />
-                </Line>
-              </LineChart>
-            </ResponsiveContainer>
+        </div>
+      ) : (
+        <>
+          {/* 🌟 CARTES DE STATISTIQUES */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1.5rem' }}>
+            <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '1rem' }}>
+              <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '0.9rem', color: 'var(--text-muted)' }}>NOMBRE D'AUDITS</h3>
+              <div style={{ fontSize: '2.5rem', fontWeight: 'bold', color: 'var(--accent)' }}>{stats.totalAudits}</div>
+            </div>
+
+            <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '1rem' }}>
+              <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '0.9rem', color: 'var(--text-muted)' }}>SCORE MOYEN</h3>
+              <div style={{ fontSize: '2.5rem', fontWeight: 'bold', color: getColor(stats.avgScore) }}>{stats.avgScore}%</div>
+            </div>
+
+            <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '1rem' }}>
+              <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '0.9rem', color: 'var(--text-muted)' }}>TENDANCE ACTUELLE</h3>
+              <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: stats.trendColor, display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.5rem' }}>
+                {stats.trendIcon} {stats.tendance}
+              </div>
+            </div>
+            
+            <div className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '1rem' }}>
+              <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '0.9rem', color: 'var(--text-muted)' }}>MIN / MAX</h3>
+              <div style={{ fontSize: '1.5rem', fontWeight: 'bold', marginTop: '0.5rem' }}>
+                <span style={{ color: 'var(--danger)' }}>{stats.minScore}%</span> / <span style={{ color: 'var(--success)' }}>{stats.maxScore}%</span>
+              </div>
+            </div>
           </div>
-        )}
-      </div>
+
+          {/* 🌟 LE GRAPHIQUE */}
+          <div className="card">
+            <h3 style={{ margin: '0 0 1.5rem 0', fontSize: '1.1rem', color: 'var(--text-main)' }}>
+              Courbe d'évolution : {selectedLigne}
+            </h3>
+            <div style={{ height: 350 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={chartData} margin={{ top: 30, right: 30, left: 0, bottom: 10 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fill: '#94a3b8' }} axisLine={false} tickLine={false} dy={10} />
+                  <YAxis domain={[0, 100]} tick={{ fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+                  <Tooltip contentStyle={{ background: '#1e293b', border: 'none', borderRadius: 8, color: '#fff' }} formatter={(v) => [`${v}%`, 'Score']} />
+                  
+                  {/* Ligne de référence pour la moyenne */}
+                  <ReferenceLine y={stats.avgScore} stroke="#f59e0b" strokeDasharray="3 3" label={{ position: 'insideTopRight', value: `Moyenne: ${stats.avgScore}%`, fill: '#f59e0b', fontSize: 12 }} />
+                  
+                  <Line type="monotone" dataKey="score" stroke="#3b82f6" strokeWidth={3} dot={{ r: 6, fill: '#3b82f6', stroke: '#1e293b', strokeWidth: 2 }} activeDot={{ r: 8 }}>
+                    <LabelList content={<CustomLabel />} />
+                  </Line>
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }

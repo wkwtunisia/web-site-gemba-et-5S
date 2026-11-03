@@ -14,9 +14,7 @@ const extractDateString = (dateStr) => {
 }
 
 const getWeekNumber = (dateStr, rawSemaine) => {
-  if (rawSemaine !== undefined && rawSemaine !== null && rawSemaine !== '') {
-    return `S${String(rawSemaine).padStart(2, '0')}`
-  }
+  if (rawSemaine !== undefined && rawSemaine !== null && rawSemaine !== '') return `S${String(rawSemaine).padStart(2, '0')}`
   const dateOnly = extractDateString(dateStr);
   if (!dateOnly) return null;
   const d = new Date(`${dateOnly}T12:00:00`);
@@ -39,8 +37,6 @@ const getStandard5M = (point_m) => {
   return null;
 }
 
-const fetchAllGemba = fetchAllGembaData;
-
 export default function GembaAnalyse() {
   const [data, setData] = useState([])
   const [loading, setLoading] = useState(true)
@@ -48,7 +44,7 @@ export default function GembaAnalyse() {
   const [endDate, setEndDate] = useState('')
   const [weekFilter, setWeekFilter] = useState('')
 
-  useEffect(() => { fetchAllGemba().then(res => { setData(res || []); setLoading(false); }) }, [])
+  useEffect(() => { fetchAllGembaData().then(res => { setData(res || []); setLoading(false); }) }, [])
 
   const availableWeeks = useMemo(() => {
     const set = new Set(); data.forEach(a => { const w = getWeekNumber(a.date, a.semaine); if (w) set.add(w); }); return Array.from(set).sort()
@@ -64,7 +60,7 @@ export default function GembaAnalyse() {
     })
   }, [data, startDate, endDate, weekFilter])
 
-  // 🌟 DÉDUPLICATION : On ne garde qu'une seule ligne par (Date + Ligne + Question)
+  // Déduplication des données (pour ne pas compter 2 fois la même question le même jour)
   const uniqueData = useMemo(() => {
     const seen = new Set()
     return filteredData.filter(row => {
@@ -88,68 +84,79 @@ export default function GembaAnalyse() {
     return true;
   };
 
-  // On utilise uniqueData au lieu de filteredData pour les calculs
-  const topNok = useMemo(() => {
-    const stats = {}
-    uniqueData.forEach(row => { 
-      const rep = String(row.reponse).toUpperCase()
-      if (rep === 'N/A' || !isValidProblem(row)) return
-      
-      const q = row.question
-      if (!stats[q]) stats[q] = { ok: 0, nok: 0, total: 0 }
-      
-      stats[q].total++
-      if (rep === 'NOK') stats[q].nok++
-      else if (rep === 'OK') stats[q].ok++
-    })
-    
-    return Object.entries(stats)
-      .map(([q, s]) => ({ q, nok: s.nok, total: s.total }))
-      .filter(s => s.nok > 0)
-      .sort((a, b) => b.nok - a.nok)
-      .slice(0, 5)
-  }, [uniqueData])
+  // 🌟 CALCUL DES STATISTIQUES
+  const stats = useMemo(() => {
+    const questionStats = {}
+    const pillarStats = {}
 
-  const topOk = useMemo(() => {
-    const stats = {}
-    uniqueData.forEach(row => { 
-      const rep = String(row.reponse).toUpperCase()
-      if (rep === 'N/A' || !isValidProblem(row)) return
-      
-      const q = row.question
-      if (!stats[q]) stats[q] = { ok: 0, nok: 0, total: 0 }
-      
-      stats[q].total++
-      if (rep === 'OK') stats[q].ok++
-      else if (rep === 'NOK') stats[q].nok++
-    })
-    
-    return Object.entries(stats)
-      .map(([q, s]) => ({ q, ok: s.ok, total: s.total }))
-      .filter(s => s.ok > 0)
-      .sort((a, b) => b.ok - a.ok)
-      .slice(0, 5)
-  }, [uniqueData])
-
-  const pillarStats = useMemo(() => {
-    const groups = {}
     uniqueData.forEach(row => {
       const rep = String(row.reponse).toUpperCase()
       if (rep === 'N/A') return
+
+      // Stats par question (pour le Top 5)
+      if (isValidProblem(row)) {
+        const q = row.question
+        if (!questionStats[q]) questionStats[q] = { ok: 0, nok: 0 }
+        if (rep === 'OK') questionStats[q].ok++
+        if (rep === 'NOK') questionStats[q].nok++
+      }
+
+      // Stats par pilier (pour les cartes du haut)
       const pilier = getStandard5M(row.point_m)
-      if (!pilier) return 
-      if (!groups[pilier]) groups[pilier] = { ok: 0, total: 0 }
-      groups[pilier].total++
-      if (rep === 'OK') groups[pilier].ok++
+      if (pilier) {
+        if (!pillarStats[pilier]) pillarStats[pilier] = { ok: 0, total: 0 }
+        pillarStats[pilier].total++
+        if (rep === 'OK') pillarStats[pilier].ok++
+      }
     })
-    return Object.entries(groups).map(([name, s]) => ({ 
-      name, 
-      score: s.total > 0 ? Math.round((s.ok / s.total) * 100) : 0 
+
+    const formattedPillars = Object.entries(pillarStats).map(([name, s]) => ({
+      name, score: s.total > 0 ? Math.round((s.ok / s.total) * 100) : 0
     })).sort((a, b) => b.score - a.score)
+
+    const topOk = Object.entries(questionStats)
+      .map(([q, s]) => ({ q, ok: s.ok, total: s.ok + s.nok }))
+      .filter(item => item.ok > 0)
+      .sort((a, b) => b.ok - a.ok)
+      .slice(0, 5)
+
+    const topNok = Object.entries(questionStats)
+      .map(([q, s]) => ({ q, nok: s.nok, total: s.ok + s.nok }))
+      .filter(item => item.nok > 0)
+      .sort((a, b) => b.nok - a.nok)
+      .slice(0, 5)
+
+    return {
+      bestPillar: formattedPillars[0] || { name: '-', score: 0 },
+      worstPillar: formattedPillars[formattedPillars.length - 1] || { name: '-', score: 0 },
+      topOk,
+      topNok
+    }
   }, [uniqueData])
 
-  const bestPillar = pillarStats[0] || { name: '-', score: 0 }
-  const worstPillar = pillarStats[pillarStats.length - 1] || { name: '-', score: 0 }
+  // 🌟 RECOMMANDATIONS
+  const recommendations = useMemo(() => {
+    const recs = [];
+    if (!stats.bestPillar || !stats.worstPillar) return recs;
+
+    if (stats.worstPillar.score < 80) {
+      recs.push({ type: 'danger', icon: '🚨', title: 'Plan d\'action d\'urgence requis', text: `Le pilier "${stats.worstPillar.name}" est critique (${stats.worstPillar.score}%). Organisez une réunion immédiate avec les responsables.` });
+    } else if (stats.worstPillar.score < 90) {
+      recs.push({ type: 'warning', icon: '⚠️', title: 'Amélioration continue nécessaire', text: `Le pilier "${stats.worstPillar.name}" est à ${stats.worstPillar.score}%. Analysez les non-conformités récurrentes.` });
+    } else {
+      recs.push({ type: 'success', icon: '✅', title: 'Performance stable', text: `Le pilier le plus faible est à ${stats.worstPillar.score}%, ce qui est très bon.` });
+    }
+
+    if (stats.topNok && stats.topNok.length > 0) {
+      recs.push({ type: 'info', icon: '🔍', title: 'Action ciblée sur le problème récurrent', text: `Le problème le plus fréquent est : "${stats.topNok[0].q}" (${stats.topNok[0].nok} fois). Utilisez la méthode des 5 Pourquoi.` });
+    }
+
+    if (stats.bestPillar && stats.bestPillar.score >= 90) {
+      recs.push({ type: 'success', icon: '🏆', title: 'Capitaliser sur les points forts', text: `Le pilier "${stats.bestPillar.name}" atteint ${stats.bestPillar.score}%. Dupliquez ces bonnes pratiques.` });
+    }
+
+    return recs;
+  }, [stats]);
 
   if (loading) return <p className="muted" style={{ padding: '2rem' }}>Chargement…</p>
 
@@ -172,17 +179,34 @@ export default function GembaAnalyse() {
         </div>
       </div>
 
+      {/* RECOMMANDATIONS */}
+      {recommendations.length > 0 && (
+        <div className="card" style={{ marginBottom: '2rem', background: 'linear-gradient(145deg, rgba(30, 41, 59, 1) 0%, rgba(15, 23, 42, 1) 100%)', border: '1px solid var(--border)' }}>
+          <h2 className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1.2rem', marginBottom: '1.5rem', color: '#f8fafc' }}>💡 Recommandations du Manager Qualité</h2>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1rem' }}>
+            {recommendations.map((rec, idx) => (
+              <div key={idx} style={{ padding: '1rem', borderRadius: '8px', 
+                background: rec.type === 'danger' ? 'rgba(239, 68, 68, 0.1)' : rec.type === 'warning' ? 'rgba(245, 158, 11, 0.1)' : rec.type === 'success' ? 'rgba(16, 185, 129, 0.1)' : 'rgba(59, 130, 246, 0.1)',
+                borderLeft: `4px solid ${rec.type === 'danger' ? 'var(--danger)' : rec.type === 'warning' ? 'var(--warning)' : rec.type === 'success' ? 'var(--success)' : 'var(--accent)'}` }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', fontWeight: 'bold', color: 'var(--text-main)' }}><span style={{ fontSize: '1.2rem' }}>{rec.icon}</span> {rec.title}</div>
+                <div style={{ fontSize: '0.9rem', color: 'var(--text-muted)', lineHeight: '1.5' }}>{rec.text}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="grid-2">
         <div className="card" style={{ borderLeft: '4px solid var(--success)', background: 'linear-gradient(90deg, rgba(16,185,129,0.1) 0%, var(--bg-card) 100%)' }}>
           <h3 style={{ margin: '0 0 0.5rem 0', color: 'var(--success)', fontSize: '1rem' }}>🛡️ Pilier à maintenir (M)</h3>
-          <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-main)' }}>{bestPillar.name}</div>
-          <div style={{ fontSize: '2.5rem', fontWeight: 800, color: 'var(--success)' }}>{bestPillar.score}%</div>
+          <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-main)' }}>{stats.bestPillar.name}</div>
+          <div style={{ fontSize: '2.5rem', fontWeight: 800, color: 'var(--success)' }}>{stats.bestPillar.score}%</div>
         </div>
 
         <div className="card">
           <h3 style={{ margin: '0 0 1.5rem 0', fontSize: '1.1rem', color: 'var(--success)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}><span>🌟</span> Top 5 des points forts (OK)</h3>
           <ul className="top-list">
-            {topOk.length === 0 ? <p className="muted">Aucune donnée.</p> : topOk.map((item, i) => (
+            {stats.topOk.length === 0 ? <p className="muted">Aucune donnée.</p> : stats.topOk.map((item, i) => (
               <li key={i} style={{ background: 'var(--bg-main)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '0.5rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
                   <span style={{ fontWeight: 'bold', color: 'var(--success)' }}>Point fort #{i + 1}</span>
@@ -196,14 +220,14 @@ export default function GembaAnalyse() {
 
         <div className="card" style={{ borderLeft: '4px solid var(--danger)', background: 'linear-gradient(90deg, rgba(239,68,68,0.1) 0%, var(--bg-card) 100%)' }}>
           <h3 style={{ margin: '0 0 0.5rem 0', color: 'var(--danger)', fontSize: '1rem' }}>🚨 Pilier à améliorer (M)</h3>
-          <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-main)' }}>{worstPillar.name}</div>
-          <div style={{ fontSize: '2.5rem', fontWeight: 800, color: 'var(--danger)' }}>{worstPillar.score}%</div>
+          <div style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--text-main)' }}>{stats.worstPillar.name}</div>
+          <div style={{ fontSize: '2.5rem', fontWeight: 800, color: 'var(--danger)' }}>{stats.worstPillar.score}%</div>
         </div>
 
         <div className="card">
           <h3 style={{ margin: '0 0 1.5rem 0', fontSize: '1.1rem', color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}><span>⚠️</span> Top 5 des vrais problèmes (NOK)</h3>
           <ul className="top-list">
-            {topNok.length === 0 ? <p className="muted">Aucun problème spécifique détecté.</p> : topNok.map((item, i) => (
+            {stats.topNok.length === 0 ? <p className="muted">Aucun problème spécifique détecté.</p> : stats.topNok.map((item, i) => (
               <li key={i} style={{ background: 'var(--bg-main)', padding: '1rem', borderRadius: '8px', border: '1px solid var(--border)', marginBottom: '0.5rem' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
                   <span style={{ fontWeight: 'bold', color: 'var(--danger)' }}>Problème #{i + 1}</span>
